@@ -1,1 +1,1 @@
-"""File containing the routes to each API endpoint."""
+"""File containing the routes to each API endpoints."""
