@@ -1,0 +1,87 @@
+# {{ project_name }}
+
+A data processing project built with the Base Data Project framework.
+
+## Setup
+
+1. Install dependencies:
+
+```bash
+pip install -r requirements.txt
+```
+
+2. Configure project:
+   - Edit `src/config.py` to set project-specific configurations
+
+## Project Structure
+
+- `main.py`: Main entry point for interactive mode
+- `batch_process.py`: Batch processing script for non-interactive mode
+- `routes.py`: API server for HTTP access to functionality
+- `data/`: Data files
+  - `csvs/`: Input CSV files
+  - `output/`: Output files
+- `logs/`: Log files
+- `src/`: Source code
+  - `config.py`: Project configuration
+  - `algorithms/`: Custom algorithms
+  - `services/`: Business logic services
+
+## Running the Project
+
+### Interactive Mode
+
+```bash
+python main.py run-process
+```
+
+### Batch Mode
+
+```bash
+python batch_process.py --algorithm example_algorithm
+```
+
+### API Server (Optional)
+
+```bash
+python routes.py
+```
+
+## Development
+
+### Adding a New Algorithm
+
+1. Create a new file in `src/algorithms/` (e.g., `my_algorithm.py`)
+2. Inherit from `base_data_project.algorithms.base.BaseAlgorithm`
+3. Implement required methods: `adapt_data`, `execute_algorithm`, and `format_results`
+4. Register in `src/algorithms/__init__.py`
+5. Add to available algorithms in `src/config.py`
+
+Example:
+
+```python
+from base_data_project.algorithms.base import BaseAlgorithm
+
+class MyAlgorithm(BaseAlgorithm):
+    def adapt_data(self, data=None):
+        # Transform data
+        return transformed_data
+        
+    def execute_algorithm(self, adapted_data=None):
+        # Execute algorithm
+        return results
+        
+    def format_results(self, algorithm_results=None):
+        # Format results
+        return formatted_results
+```
+
+### Adding a New Service
+
+1. Create a new file in `src/services/` (e.g., `my_service.py`)
+2. Implement your service class with appropriate methods
+3. Use the process tracking infrastructure for visibility
+
+## License
+
+[Your License]

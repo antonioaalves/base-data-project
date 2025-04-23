@@ -1,0 +1,178 @@
+"""Example algorithm implementation for the {{ project_name }} project."""
+
+import logging
+from typing import Dict, Any, Optional
+from datetime import datetime
+
+# Import base_data_project components
+from base_data_project.algorithms.base import BaseAlgorithm
+
+# Import project-specific components
+from src.config import PROJECT_NAME
+
+# Set up logger
+logger = logging.getLogger(PROJECT_NAME)
+
+class ExampleAlgorithm(BaseAlgorithm):
+    """
+    Example algorithm implementation to demonstrate how to create custom algorithms.
+    
+    Inherits from the BaseAlgorithm class in the base_data_project framework.
+    """
+
+    def __init__(self, data: Any, parameters: Optional[Dict[str, Any]] = None, algo_name: Optional[str] = None):
+        """
+        Initialize the algorithm with data and parameters.
+        
+        Args:
+            data: Input data for the algorithm
+            parameters: Optional algorithm parameters
+            algo_name: Optional algorithm name override
+        """
+        # Use the passed algo_name or default to "ExampleAlgorithm"
+        actual_algo_name = algo_name or "ExampleAlgorithm"
+        
+        # Initialize the parent class
+        super().__init__(algo_name=actual_algo_name, parameters=parameters or {})
+        
+        # Store input data
+        self.data = data
+        
+        # Initialize result storage
+        self.results = None
+        self.status = "not_started"
+        
+        logger.info(f"Initialized {self.algo_name} algorithm")
+
+    def adapt_data(self, data: Any = None) -> Any:
+        """
+        Transform the input data into algorithm-specific format.
+        
+        Args:
+            data: Optional data to override the data provided at initialization
+            
+        Returns:
+            Transformed data in the format needed by the algorithm
+        """
+        try:
+            logger.info(f"Adapting data for {self.algo_name}")
+            
+            # Use provided data or instance data
+            input_data = data if data is not None else self.data
+            
+            # TODO: Implement your data transformation logic here
+            # For demonstration purposes, we'll just use the input data as-is
+            adapted_data = input_data
+            
+            logger.info("Data adaptation completed successfully")
+            return adapted_data
+            
+        except Exception as e:
+            logger.error(f"Error during data adaptation: {str(e)}")
+            raise
+
+    def execute_algorithm(self, adapted_data: Any = None) -> Dict[str, Any]:
+        """
+        Execute the core algorithm logic.
+        
+        Args:
+            adapted_data: Data that has been prepared by adapt_data
+            
+        Returns:
+            Algorithm results
+        """
+        try:
+            logger.info(f"Executing algorithm {self.algo_name}")
+            
+            # Use provided data or instance data
+            data_to_process = adapted_data if adapted_data is not None else self.data
+            
+            # TODO: Implement your algorithm logic here
+            # For demonstration purposes, we'll create a dummy result
+            results = {
+                "status": "success",
+                "metrics": {
+                    "accuracy": 0.95,
+                    "runtime_ms": 1500
+                },
+                "timestamp": datetime.now().isoformat()
+            }
+            
+            self.status = "completed"
+            logger.info(f"Algorithm {self.algo_name} execution completed successfully")
+            return results
+            
+        except Exception as e:
+            self.status = "failed"
+            logger.error(f"Error during algorithm execution: {str(e)}")
+            raise
+
+    def format_results(self, algorithm_results: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        """
+        Format algorithm results into standardized structure.
+        
+        Args:
+            algorithm_results: Raw results from execute_algorithm
+            
+        Returns:
+            Formatted results
+        """
+        try:
+            logger.info(f"Formatting results for {self.algo_name}")
+            
+            # Use provided results or empty dict if None
+            results_to_format = algorithm_results if algorithm_results is not None else {}
+            
+            # Store the results for later access
+            self.results = {
+                "algorithm_name": self.algo_name,
+                "status": self.status,
+                "metrics": results_to_format.get("metrics", {}),
+                "data": results_to_format
+            }
+            
+            logger.info("Results formatting completed successfully")
+            return self.results
+            
+        except Exception as e:
+            logger.error(f"Error formatting results: {str(e)}")
+            raise
+
+    def save_output(self, output_path: Optional[str] = None) -> Optional[str]:
+        """
+        Save algorithm results to file.
+        
+        Args:
+            output_path: Optional path to save results
+            
+        Returns:
+            Path to saved file or None if saving failed
+        """
+        if not self.results:
+            logger.warning("No results to save")
+            return None
+            
+        try:
+            import json
+            import os
+            from datetime import datetime
+            
+            # Generate output path if not provided
+            if not output_path:
+                from base_data_project.path_helpers import get_output_path
+                timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+                output_path = get_output_path(f"{self.algo_name}_{timestamp}.json")
+            
+            # Create directory if it doesn't exist
+            os.makedirs(os.path.dirname(output_path), exist_ok=True)
+            
+            # Save results to file
+            with open(output_path, 'w') as f:
+                json.dump(self.results, f, indent=2)
+                
+            logger.info(f"Saved results to {output_path}")
+            return output_path
+            
+        except Exception as e:
+            logger.error(f"Error saving output: {str(e)}")
+            return None

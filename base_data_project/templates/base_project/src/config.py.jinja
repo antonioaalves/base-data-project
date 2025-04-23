@@ -1,0 +1,106 @@
+"""Configuration for the {{ project_name }} project."""
+
+import os
+from pathlib import Path
+
+# Project name - used for logging and process tracking
+PROJECT_NAME = "{{ project_name_underscores }}"
+
+# Get application root directory
+ROOT_DIR = Path(__file__).resolve().parents[1]
+
+CONFIG = {
+    # Database configuration
+    'use_db': False,
+    'db_url': f"sqlite:///{os.path.join(ROOT_DIR, 'data', 'production.db')}",
+    
+    # Base directories
+    'data_dir': os.path.join(ROOT_DIR, 'data'),
+    'output_dir': os.path.join(ROOT_DIR, 'data', 'output'),
+    'log_dir': os.path.join(ROOT_DIR, 'logs'),
+    
+    # File paths for CSV data sources
+    'dummy_data_filepaths': {
+        # Add your data files here
+        # 'example': os.path.join(ROOT_DIR, 'data', 'csvs', 'example.csv'),
+    },
+    
+    # Available algorithms (used by AlgorithmFactory)
+    'available_algorithms': [
+        # Register your algorithms here
+        'example_algorithm',
+    ],
+    
+    # Process configuration - stages and decision points
+    'stages': {
+        'data_loading': {
+            'sequence': 1,
+            'requires_previous': False,
+            'validation_required': True,
+            'decisions': {
+                'selections': {
+                    'apply_selection': True,
+                    'parameters': []
+                }
+            }
+        },
+        'data_transformation': {
+            'sequence': 2,
+            'requires_previous': True,
+            'validation_required': True,
+            'decisions': {
+                'transformations': {
+                    'apply_transformations': False,
+                    'parameters': []
+                }
+            }
+        },
+        'processing': {
+            'sequence': 3,
+            'requires_previous': True,
+            'validation_required': True,
+            'algorithms': [
+                'example_algorithm'
+            ],
+            'decisions': {
+                'algorithm_selection': {
+                    'algorithm': 'example_algorithm',
+                    'parameters': {}
+                }
+            }
+        },
+        'result_analysis': {
+            'sequence': 4,
+            'requires_previous': True,
+            'validation_required': True,
+            'decisions': {
+                'report_generation': {
+                    'generate_report': True,
+                    'report_format': 'html'
+                }
+            }
+        }
+    },
+    
+    # Algorithm parameters
+    'algorithm_defaults': {
+        'example_algorithm': {
+            'parameter1': 'value1',
+            'parameter2': 'value2'
+        }
+    },
+    
+    # Output configuration
+    'output': {
+        'base_dir': 'data/output',
+        'visualizations_dir': 'data/output/visualizations',
+        'diagnostics_dir': 'data/diagnostics'
+    },
+    
+    # Logging configuration
+    'log_level': 'INFO',
+    'log_format': '%(asctime)s | %(levelname)8s | %(filename)s:%(lineno)d | %(message)s',
+    'log_dir': 'logs'
+}
+
+# Add any project-specific configuration below
