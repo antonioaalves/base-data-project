@@ -34,8 +34,11 @@ class ProcessStageHandler:
         self.current_process_id = None
         self.initialized = False
         
+        # Get project name from config
+        project_name = config.get('PROJECT_NAME', 'base_data_project')
+        
         # Get logger
-        self.logger = logging.getLogger(config.get('PROJECT_NAME', 'base_data_project'))
+        self.logger = logging.getLogger(project_name)
         
     def initialize_process(self, name: str, description: str) -> str:
         """
@@ -172,19 +175,23 @@ class ProcessStageHandler:
         
         # Track stage start in process manager if available
         if self.process_manager:
-            self.process_manager.store_generated_data(
-                stage=stage,
-                data_type="stage_execution",
-                entity_type="stage",
-                entity_id=stage['id'],
-                value=1.0,
-                metadata={
-                    "action": "start",
-                    "stage_name": stage_name,
-                    "algorithm": algorithm_name,
-                    "timestamp": datetime.now().isoformat()
-                }
-            )
+            try:
+                self.process_manager.store_generated_data(
+                    stage=stage,
+                    data_type="stage_execution",
+                    entity_type="stage",
+                    entity_id=stage['id'],
+                    value=1.0,
+                    metadata={
+                        "action": "start",
+                        "stage_name": stage_name,
+                        "algorithm": algorithm_name,
+                        "timestamp": datetime.now().isoformat()
+                    }
+                )
+            except Exception as e:
+                # Log but don't fail if tracking fails
+                self.logger.warning(f"Error tracking stage start: {str(e)}")
         
         return stage
     
@@ -221,32 +228,46 @@ class ProcessStageHandler:
         
         # Track stage completion in process manager if available
         if self.process_manager:
-            self.process_manager.store_generated_data(
-                stage=stage,
-                data_type="stage_execution",
-                entity_type="stage",
-                entity_id=stage['id'],
-                value=1.0 if success else 0.0,
-                metadata={
-                    "action": "complete",
-                    "stage_name": stage_name,
-                    "status": stage['status'],
-                    "algorithm": stage.get('current_algorithm'),
-                    "execution_time": (stage['completed_at'] - stage['started_at']).total_seconds(),
-                    "timestamp": datetime.now().isoformat(),
-                    "result_summary": {k: v for k, v in (result_data or {}).items() if not isinstance(v, (list, dict))}
-                }
-            )
+            try:
+                execution_time = (stage['completed_at'] - stage['started_at']).total_seconds()
+                
+                # Create a simplified result summary for tracking
+                result_summary = {}
+                if result_data:
+                    # Extract scalar values for the summary, avoiding large objects
+                    for k, v in result_data.items():
+                        if not isinstance(v, (list, dict)) or (isinstance(v, (list, dict)) and len(v) < 10):
+                            result_summary[k] = v
+                
+                self.process_manager.store_generated_data(
+                    stage=stage,
+                    data_type="stage_execution",
+                    entity_type="stage",
+                    entity_id=stage['id'],
+                    value=1.0 if success else 0.0,
+                    metadata={
+                        "action": "complete",
+                        "stage_name": stage_name,
+                        "status": stage['status'],
+                        "algorithm": stage.get('current_algorithm'),
+                        "execution_time": execution_time,
+                        "timestamp": datetime.now().isoformat(),
+                        "result_summary": result_summary
+                    }
+                )
+            except Exception as e:
+                # Log but don't fail if tracking fails
+                self.logger.warning(f"Error tracking stage completion: {str(e)}")
         
         return stage
     
-    def record_stage_decision(self, stage_name: str, algorithm_name: str, parameters: Dict[str, Any]) -> None:
+    def record_stage_decision(self, stage_name: str, decision_name: str, parameters: Dict[str, Any]) -> None:
         """
         Record a decision made for a stage
         
         Args:
             stage_name: Name of the stage
-            algorithm_name: Name of the algorithm
+            decision_name: Name of the decision point
             parameters: Decision parameters
         """
         if stage_name not in self.stages:
@@ -255,7 +276,7 @@ class ProcessStageHandler:
         stage = self.stages[stage_name]
         
         # Record the decision
-        stage['decisions'][algorithm_name] = parameters
+        stage['decisions'][decision_name] = parameters
         
         # Record in process manager if available
         if self.process_manager:
@@ -267,12 +288,11 @@ class ProcessStageHandler:
                 self.process_manager.make_decisions(
                     stage=sequence,
                     decision_values={
-                        'algorithm': algorithm_name,
-                        'parameters': parameters
+                        decision_name: parameters
                     }
                 )
                 
-                self.logger.info(f"Recorded decision for stage {stage_name}, algorithm {algorithm_name}")
+                self.logger.info(f"Recorded decision for stage {stage_name}, decision {decision_name}")
                 
             except Exception as e:
                 self.logger.error(f"Error recording decision: {str(e)}")
@@ -309,18 +329,22 @@ class ProcessStageHandler:
         
         # Track in process manager if available
         if self.process_manager:
-            self.process_manager.store_generated_data(
-                stage=stage,
-                data_type="progress_update",
-                entity_type="stage",
-                entity_id=stage['id'],
-                value=progress,
-                metadata={
-                    "message": message,
-                    "timestamp": tracking_entry['timestamp'].isoformat(),
-                    **(metadata or {})
-                }
-            )
+            try:
+                self.process_manager.store_generated_data(
+                    stage=stage,
+                    data_type="progress_update",
+                    entity_type="stage",
+                    entity_id=stage['id'],
+                    value=progress,
+                    metadata={
+                        "message": message,
+                        "timestamp": tracking_entry['timestamp'].isoformat(),
+                        **(metadata or {})
+                    }
+                )
+            except Exception as e:
+                # Log but don't fail if tracking fails
+                self.logger.warning(f"Error tracking progress: {str(e)}")
     
     def get_stage_status(self, stage_name: str) -> Dict[str, Any]:
         """

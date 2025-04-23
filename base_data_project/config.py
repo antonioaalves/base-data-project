@@ -1,8 +1,11 @@
-"""File containing basic project configurations"""
+"""Configuration utilities for the base data project framework."""
 
-# Dependencies
 import os
 from pathlib import Path
+from typing import Dict, Any, Optional
+
+# Project name - This should be overridden by specific projects
+PROJECT_NAME = 'base_data_project'
 
 # Get application root directory (where main.py is located)
 ROOT_DIR = Path(__file__).resolve().parents[1]
@@ -50,8 +53,8 @@ CONFIG = {
             'decisions': {
                 'filtering':{
                     'apply_filtering': False,
-                    'excluded_employees': '', # to create defaults, try using a list, and make sure the decision handling is not convertng it to a string
-                    'excluded_lines': '', # to create defaults, try using a list, and make sure the decision handling is not convertng it to a string
+                    'excluded_employees': [], # to create defaults, try using a list, and make sure the decision handling is not convertng it to a string
+                    'excluded_lines': [], # to create defaults, try using a list, and make sure the decision handling is not convertng it to a string
                 },
                 'time_periods': 1
             }
@@ -112,10 +115,71 @@ CONFIG = {
         'visualizations_dir': 'data/output/visualizations',
         'diagnostics_dir': 'data/diagnostics'
     },
-
     
     # Logging configuration
     'log_level': 'INFO',
     'log_format': '%(asctime)s | %(levelname)8s | %(filename)s:%(lineno)d | %(message)s',
     'log_dir': 'logs'
 }
+
+def get_config() -> Dict[str, Any]:
+    """
+    Get the configuration dictionary.
+    
+    Returns:
+        Dictionary with configuration values
+    """
+    return CONFIG
+
+def update_config(new_values: Dict[str, Any]) -> None:
+    """
+    Update the configuration with new values.
+    
+    Args:
+        new_values: Dictionary with new configuration values
+    """
+    global CONFIG
+    
+    # Recursively update nested dictionaries
+    def update_dict(d, u):
+        for k, v in u.items():
+            if isinstance(v, dict) and k in d and isinstance(d[k], dict):
+                update_dict(d[k], v)
+            else:
+                d[k] = v
+    
+    update_dict(CONFIG, new_values)
+
+def get_config_value(path: str, default: Any = None) -> Any:
+    """
+    Get a specific configuration value using dot notation.
+    
+    Args:
+        path: Path to the configuration value using dot notation
+              (e.g., 'database.connection.host')
+        default: Default value to return if the path is not found
+        
+    Returns:
+        Configuration value or default if not found
+    """
+    parts = path.split('.')
+    value = CONFIG
+    
+    try:
+        for part in parts:
+            value = value[part]
+        return value
+    except (KeyError, TypeError):
+        return default
+
+def set_project_name(name: str) -> None:
+    """
+    Set the project name.
+    
+    Args:
+        name: Project name
+    """
+    global PROJECT_NAME
+    PROJECT_NAME = name
+    # Also update in CONFIG
+    CONFIG['PROJECT_NAME'] = name
