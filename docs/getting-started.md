@@ -4,11 +4,52 @@ This guide will help you quickly set up and begin working with the Base Data Pro
 
 ## Installation
 
+### From PyPi (recommended when available)
+
 Install the framework using pip:
 
 ```bash
 pip install base-data-project
 ```
+
+### From GitHub Repository
+
+```bash
+pip install git+https://github.com/antonioaalves/base-data-project.git
+```
+
+### From Local source
+
+```bash
+# Clone the repository
+git clone https://github.com/username/base-data-project.git
+cd base-data-project
+
+# Install in development mode
+pip install -e .
+```
+
+### Using a Virtual Environment
+It's best practice to use a virtual environment for Python projects to avoid dependency conflits
+
+```bash
+# Create a virtual environment
+python -m venv .venv
+
+# Activate the virtual environment
+# On Windows:
+.venv\Scripts\activate
+# On macOS/Linux:
+source env/bin/activate
+
+# Now install the package
+pip install base-data-project
+
+# When finished, deactivate the environment
+deactivate
+```
+
+TODO: Add stes fpr anaconda
 
 ## Creating a New Project
 
