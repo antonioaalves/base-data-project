@@ -1,5 +1,3 @@
-"""File containing the class responsible for all data operations"""
-
 # Note: this is an actual implementation, this should be replaced with proper data logic for a specific project
 
 # Import dependencies
@@ -10,7 +8,7 @@ import logging
 from typing import Dict, List, Any
 
 # Local stuff
-from src.config import CONFIG
+from base_data_project.config import CONFIG
 
 project_name = '' # TODO: Define project name here, or create a global name in config file (need to be the same everywhere)
 
