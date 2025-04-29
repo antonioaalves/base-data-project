@@ -207,12 +207,13 @@ class ProcessManager:
         self.computation_cache[cache_key] = result
         return result
     
-    def _check_required_decisions(self, stage: int) -> None:
+    def _check_required_decisions(self, stage: int, substage: Optional[str] = None) -> None:
         """
-        Check if all required decisions for this stage are made.
+        Check if all required decisions for this stage and substages are made.
         
         Args:
             stage: The stage to check required decisions for
+            substage: Optional substage to chek required decisions for
             
         Raises:
             InvalidDataError: If a required decision is missing
@@ -224,6 +225,30 @@ class ProcessManager:
                 error_msg = f"Required decision for stage {prior_stage} is missing"
                 self.logger.error(error_msg)
                 raise InvalidDataError(error_msg)
+            
+        # If a substage is specified, also check required decisions for previous substages within the current stage            
+        if substage is not None:
+            # Get substages configuration for the current stage
+            stage_config = self.config.get('stages', {}).get(stage, {})
+            substages = stage_config.get('substages', {})
+
+            # Get the sequence of the current substage
+            current_stage_seq = substages.get(substage, {}).get('sequence', 0)
+
+            # Check required decisions for revious substages
+            for substage_name, substage_config in substages.items():
+                substage_seq = substage_config.get('sequence', 0)
+                # Only check previous substages
+                if substage_seq < current_stage_seq:
+                    # Get decision oints for this substage
+                    decision_key = f"{stage}_{substage_name}"
+
+                    if (decision_key in self.decision_points and
+                        self.decision_points[decision_key]['required'] and
+                        decision_key not in self.current_decisions):
+                        error_msg = f"Required decision for substage {substage_name} in stage {stage} is missing"
+                        self.logger.error(error_msg)
+                        raise InvalidDataError(error_msg)
     
     def _generate_cache_key(self, stage: int) -> Union[int, str]:
         """

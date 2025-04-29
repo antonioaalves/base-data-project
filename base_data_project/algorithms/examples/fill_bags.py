@@ -4,11 +4,100 @@
 import logging
 import pandas as pd
 import heapq
+from typing import List, Dict, Any
 
 # Local stuff
-from src.helpers import parse_bags, parse_balls
-from src.algorithms.base import BaseAlgorithm
-from src.data_manager.managers.base import BaseDataManager
+from base_data_project.algorithms.base import BaseAlgorithm
+from base_data_project.data_manager.managers.base import BaseDataManager
+
+def parse_bags(data: pd.DataFrame) -> List[Dict[str, Any]]:
+    """
+    Parse bags data from DataFrame into list of dictionaries.
+    
+    This function converts a DataFrame containing bag data into a list of
+    dictionary objects for use in allocation algorithms.
+    
+    Args:
+        data: DataFrame containing bag data with columns:
+             - capacity: Numeric capacity of the bag
+             - color: String identifier of the bag category
+             - bag_id: (Optional) Unique identifier for the bag
+    
+    Returns:
+        List of dictionaries where each dictionary represents a bag
+    """
+    logger.info("Parsing bags data from DataFrame")
+    bags = []
+    
+    # Iterate over DataFrame rows using iterrows()
+    for index, row in data.iterrows():
+        try:
+            # Convert row to dictionary and ensure capacity is float
+            bag = {
+                'capacity': float(row['capacity']),
+                'color': row['color'],
+                'bag_id': row['bag_id'] if 'bag_id' in row else index  # Include bag_id if available
+            }
+            bags.append(bag)
+        except (ValueError, KeyError) as e:
+            logger.error(f"Error parsing bag at index {index}: {str(e)}")
+            logger.error(f"Row data: {row}")
+            # Continue with next row instead of failing completely
+    
+    logger.info(f"Successfully parsed {len(bags)} bags")
+    return bags
+
+def parse_balls(data: pd.DataFrame) -> List[Dict[str, Any]]:
+    """
+    Parse balls data from DataFrame into list of dictionaries.
+    
+    This function converts a DataFrame containing ball data into a list of
+    dictionary objects for use in allocation algorithms.
+    
+    Args:
+        data: DataFrame containing ball data with columns:
+             - ID: Unique identifier for the ball
+             - colors: Comma-separated string of allowed colors/categories
+             - capacity_contribution: Numeric capacity contribution of the ball
+    
+    Returns:
+        List of dictionaries where each dictionary represents a ball
+    """
+    logger.info("Parsing balls data from DataFrame")
+    balls = []
+    
+    # Validate required columns
+    required_cols = ['ID', 'colors', 'capacity_contribution']
+    missing_cols = [col for col in required_cols if col not in data.columns]
+    if missing_cols:
+        logger.error(f"Missing required columns in ball data: {missing_cols}")
+        logger.error(f"Available columns: {data.columns.tolist()}")
+        return balls  # Return empty list if required columns are missing
+    
+    # Iterate over DataFrame rows
+    for index, row in data.iterrows():
+        try:
+            # Process colors - convert comma-separated string to list
+            colors_str = row['colors']
+            if pd.isna(colors_str):
+                colors = []
+            else:
+                colors = [color.strip() for color in str(colors_str).split(',') if color.strip()]
+            
+            # Convert row to dictionary
+            ball = {
+                'id': row['ID'],
+                'colors': colors,
+                'capacity_contribution': float(row['capacity_contribution'])
+            }
+            balls.append(ball)
+        except (ValueError, KeyError) as e:
+            logger.error(f"Error parsing ball at index {index}: {str(e)}")
+            logger.error(f"Row data: {row}")
+            # Continue with next row instead of failing completely
+    
+    logger.info(f"Successfully parsed {len(balls)} balls")
+    return balls
 
 # Get logger
 logger = logging.getLogger()
