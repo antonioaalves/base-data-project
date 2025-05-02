@@ -1,0 +1,844 @@
+"""Data models and operations for the {{ project_name }} project.
+
+This module contains data models, transformation functions, and utility methods
+for working with the project's data structures.
+"""
+
+import logging
+import pandas as pd
+import numpy as np
+import rpy2.robjects as ro
+from rpy2.robjects import pandas2ri
+from rpy2.robjects.packages import importr
+from rpy2.rinterface_lib.embedded import RRuntimeError
+from typing import Dict, List, Any, Optional, Union, Tuple
+from datetime import datetime
+
+# Import project-specific components
+from src.config import PROJECT_NAME, CONFIG
+from base_data_project.data_manager.managers.base import BaseDataManager
+
+# Set up logger
+logger = logging.getLogger(PROJECT_NAME)
+
+class DataContainerDescansos:
+    """
+    Container for managing and transforming project data.
+    
+    This class provides a central place for data operations including:
+    - Loading and validating data entities
+    - Transforming data for analysis
+    - Tracking data lineage and operations
+    """
+    
+    def __init__(self):
+        """Initialize an empty data container."""
+        # Raw data storage
+        self.raw_data = {}
+        
+        # Transformed data
+        self.transformed_data = {}
+
+        # Result data
+        self.result_data = {}
+
+        # Formated data
+        self.formated_data = {}
+        
+        # Metadata for tracking operations
+        self.operations_log = []
+        
+        logger.info("DataContainer initialized")
+    
+    def load_from_data_manager_raw(self, data_manager: BaseDataManager, entities: List[str] = ['valid_employees']) -> bool:
+        """
+        Load data from the data manager.
+        
+        Args:
+            data_manager: The data manager instance
+            enities: list of entities names to load
+            
+        Returns:
+            True if successful, False otherwise
+        """
+        try:
+            logger.info("Loading data from data manager")
+            
+            # Get entities to load from configuration
+            if not entities:
+                logger.warning("No entities passed as argument")
+                return False
+            
+            # Load each entity
+            for entity in entities:
+                try:
+                    data = data_manager.load_data(entity)
+                    
+                    if data is not None and len(data) > 0:
+                        self.raw_data[entity] = data
+                        logger.info(f"Loaded {entity}: {len(data)} records")
+                    else:
+                        logger.warning(f"No data loaded for entity: {entity}")
+
+                except Exception as e:
+                    logger.error(f"Error loading entity {entity}: {str(e)}")
+
+            if not self.raw_data:
+                logger.warning("No data was loaded")
+                return False
+            
+
+                
+            logger.info(f"Successfully loaded {len(self.raw_data)} entities")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error loading data from data manager: {str(e)}")
+            return False
+    
+    def validate_raw(self) -> bool:
+        """
+        Validate that the required data is present, conforming, and valid.
+        
+        Returns:
+            True if validation passes, False otherwise
+        """
+        try:
+            logger.info("Validating data")
+            
+            if not self.raw_data:
+                logger.warning("No data to validate")
+                return False
+            
+            # Track validation results for each entity
+            validation_results = {}
+            
+            for entity_name, data in self.raw_data.items():
+                # Check if data is not empty
+                if data is None or len(data) == 0:
+                    validation_results[entity_name] = {
+                        "valid": False,
+                        "reason": "Empty dataset"
+                    }
+                    continue
+                
+                # Basic validation checks
+                entity_validation = {
+                    "valid": True,
+                    "record_count": len(data),
+                    "column_count": len(data.columns) if hasattr(data, 'columns') else 0,
+                    "issues": []
+                }
+                
+                # Check for missing values
+                if hasattr(data, 'isna'):
+                    missing_count = data.isna().sum().sum()
+                    if missing_count > 0:
+                        entity_validation["issues"].append(f"Contains {missing_count} missing values")
+                
+                # Check for duplicate records if there's an ID column
+                id_columns = [col for col in data.columns if 'id' in col.lower()] if hasattr(data, 'columns') else []
+                if id_columns and hasattr(data, 'duplicated'):
+                    for id_col in id_columns:
+                        if data[id_col].duplicated().any():
+                            dup_count = data[id_col].duplicated().sum()
+                            entity_validation["issues"].append(f"Contains {dup_count} duplicate {id_col} values")
+                
+                # Add more entity-specific validation as needed
+                # For example, checking specific columns, data types, value ranges, etc.
+                
+                # Set overall validity based on issues
+                entity_validation["valid"] = len(entity_validation["issues"]) == 0
+                validation_results[entity_name] = entity_validation
+            
+            # Check if all entities are valid
+            all_valid = all(result["valid"] for result in validation_results.values())
+            
+            if all_valid:
+                logger.info("All data validated successfully")
+            else:
+                # Log validation issues
+                for entity, result in validation_results.items():
+                    if not result["valid"]:
+                        issues = ', '.join(result.get("issues", []))
+                        logger.warning(f"Validation failed for {entity}: {issues}")
+                
+                logger.warning("Data validation failed")
+            
+            # Store validation results
+            self.validation_results = validation_results
+            
+            return all_valid
+            
+        except Exception as e:
+            logger.error(f"Error during data validation: {str(e)}")
+            return False
+
+    def func_inicializa(self, filepath: str = "src/algorithms/R_algorithms/func_inicializa.R") -> bool:
+        """
+        Func inicializa from R file. Initializes variables. 
+        Args:
+
+        """
+        try:
+            # Convert all pandas DataFrames to R dataframes and assign them to R global env
+            dataframes_dict = {
+                # TODO: Define the several dataframes taken as arguments to R function
+                'df1': self.raw_data
+            }
+            for name, df in dataframes_dict.items():
+                ro.globalenv[name] = pandas2ri.py2rpy(df)
+            
+            # Source the R script
+            ro.r(f'source("{filepath}")')
+            
+            # If your R script has a main function, you can call it
+            # Assuming the R script has a function called "func_inicializa" that returns results
+            result = ro.r['func_inicializa']()
+            
+            # Convert results back to Python/pandas objects
+            # This depends on what your R script returns
+            if isinstance(result, ro.vectors.ListVector):
+                # Convert a list of dataframes
+                self.transformed_data = {}
+                for i, name in enumerate(result.names):
+                    self.transformed_data[name] = pandas2ri.rpy2py(result[i])
+                return True
+            else:
+                # Single result
+                logger.warning("Returning R dataframe objects.")
+                return pandas2ri.rpy2py(result)
+            
+        except RRuntimeError as e:
+            logger.error(f"R error: {str(e)}")
+            return False
+        except Exception as e:
+            logger.error(f"Error performing func_inicializa from data manager: {str(e)}")
+            return False
+        
+    def validate_func_inicializa(self):
+        """
+        Validates func_inicializa operations. Validates data before running the allocation cycle.
+        """
+        try:
+            # TODO: Implement validation logic
+            logger.info("Entered func_inicializa validation. Needs to be implemented.")
+            return True
+        except Exception as e:
+            logger.error(f"Error validating func_inicializa from data manager: {str(e)}")
+            return False
+
+    def allocation_cycle(self, filepath: str = "src/algorithms/R_algorithms/allocation_cycle.R") -> bool:
+        """
+        Running the actual allocation cycle from R file. Initializes variables. 
+        Args:
+            filepath: relative path to R algorithm
+        Returns: 
+            True if 
+        """
+        try:
+            # Convert all pandas DataFrames to R dataframes and assign them to R global env
+            dataframes_dict = {
+                # TODO: Define the several dataframes taken as arguments to R function
+                'df1': self.transform_data
+            }
+            for name, df in dataframes_dict.items():
+                ro.globalenv[name] = pandas2ri.py2rpy(df)
+            
+            # Source the R script
+            ro.r(f'source("{filepath}")')
+            
+            # If your R script has a main function, you can call it
+            # Assuming the R script has a function called "func_inicializa" that returns results
+            result = ro.r['allocation_cycle']()
+            
+            # Convert results back to Python/pandas objects
+            # This depends on what your R script returns
+            if isinstance(result, ro.vectors.ListVector):
+                # Convert a list of dataframes
+                self.result_data = {}
+                for i, name in enumerate(result.names):
+                    self.result_data[name] = pandas2ri.rpy2py(result[i])
+                return True
+            else:
+                # Single result
+                logger.warning("Returning R dataframe objects.")
+                return pandas2ri.rpy2py(result)
+
+        except RRuntimeError as e:
+            logger.error(f"R error: {str(e)}")
+            return False
+        except Exception as e:
+            logger.error(f"Error performing allocation_cycle from data manager: {str(e)}")
+            return False   
+
+    def validate_allocation_cycle(self) -> bool:
+        """
+        Validates func_inicializa operations. Validates data before running the allocation cycle.
+        """
+        # TODO: Where should it be? here or after formatting results
+        try:
+            # TODO: Implement validation logic
+            logger.info("Entered func_inicializa validation. Needs to be implemented.")
+            return True
+        except Exception as e:
+            logger.error(f"Error validating allocation_cycle from data manager: {str(e)}")
+            return False
+
+    def format_results(self) -> bool:
+        """
+        Method responsible for formatting results before inserting.
+        """
+        try:
+            self.formated_data = self.result_data
+            logger.info("Entered format_results method. Needs to be implemented.")
+            return True            
+        except Exception as e:
+            logger.error(f"Error performing format_results from data manager: {str(e)}")
+            return False
+
+    def validate_format_results(self) -> bool:
+        """
+        Method responsible for validating formatted results before inserting.
+        """
+        try:
+            self.formated_data = self.result_data
+            logger.info("Entered func_inicializa validation. Needs to be implemented.")
+            return True            
+        except Exception as e:
+            logger.error(f"Error validating format_results from data manager: {str(e)}")
+            return False
+        
+    def insert_results(self, data_manager: BaseDataManager, stmt: str = None) -> Tuple[bool, List[str]]:
+        """
+        Method for inserting results in the data source.
+        """
+        try:
+            valid = True
+            valid_insertions = []
+            for entity, df in self.formated_data.items():
+                success = data_manager.save_data(entity=entity, data=df)
+                valid_insertions.append(entity)
+                if not success:
+                    valid = False
+            if not valid:
+                logger.warning(f"Inserted only these entities {valid_insertions}")
+                return False, valid_insertions
+            else:
+                logger.info(f"Inserted these entities: {valid_insertions}")
+                return True, valid_insertions
+        except Exception as e:
+            logger.error(f"Error performing insert_results from data manager: {str(e)}")
+            return False, []       
+
+    def validate_insert_results(self, data_manager: BaseDataManager) -> bool:
+        """
+        Method for validating insertion results.
+        """
+        try:
+            # TODO: Implement validation logic through data source
+            logger.info("Entered func_inicializa validation. Needs to be implemented.")
+            return True
+        except Exception as e:
+            logger.error(f"Error validating insert_results from data manager: {str(e)}")
+            return False                    
+
+    def transform_data(self, transformation_params: Optional[Dict[str, Any]] = None) -> bool:
+        """
+        Transform raw data based on specified parameters.
+        
+        Args:
+            transformation_params: Dictionary of transformation parameters
+            
+        Returns:
+            True if successful, False otherwise
+        """
+        try:
+            logger.info("Transforming data")
+            
+            if not self.raw_data:
+                logger.warning("No raw data to transform")
+                return False
+            
+            # Default transformation parameters
+            params = {
+                'normalize_numeric': False,
+                'fill_missing': False,
+                'fill_method': 'mean',
+                'remove_outliers': False,
+                'outlier_threshold': 3.0
+            }
+            
+            # Update with provided parameters
+            if transformation_params:
+                params.update(transformation_params)
+            
+            logger.info(f"Using transformation parameters: {params}")
+            
+            # Initialize transformed data
+            self.transformed_data = {}
+            
+            # Transform each entity
+            for entity_name, data in self.raw_data.items():
+                try:
+                    logger.info(f"Transforming entity: {entity_name}")
+                    
+                    # Make a copy to avoid modifying the original
+                    df = data.copy() if hasattr(data, 'copy') else data
+                    
+                    # Handle missing values if requested
+                    if params['fill_missing'] and hasattr(df, 'isna') and hasattr(df, 'fillna'):
+                        # Get numeric columns
+                        numeric_cols = df.select_dtypes(include=['number']).columns
+                        
+                        if len(numeric_cols) > 0:
+                            if params['fill_method'] == 'mean':
+                                for col in numeric_cols:
+                                    df[col] = df[col].fillna(df[col].mean())
+                            elif params['fill_method'] == 'median':
+                                for col in numeric_cols:
+                                    df[col] = df[col].fillna(df[col].median())
+                            elif params['fill_method'] == 'zero':
+                                for col in numeric_cols:
+                                    df[col] = df[col].fillna(0)
+                        
+                        # Fill non-numeric columns with mode
+                        non_numeric_cols = df.select_dtypes(exclude=['number']).columns
+                        for col in non_numeric_cols:
+                            mode_value = df[col].mode()[0] if not df[col].mode().empty else None
+                            if mode_value is not None:
+                                df[col] = df[col].fillna(mode_value)
+                    
+                    # Normalize numeric columns if requested
+                    if params['normalize_numeric'] and hasattr(df, 'select_dtypes'):
+                        numeric_cols = df.select_dtypes(include=['number']).columns
+                        
+                        for col in numeric_cols:
+                            # Skip columns with all zeros or a single value
+                            if df[col].std() > 0:
+                                df[col] = (df[col] - df[col].mean()) / df[col].std()
+                    
+                    # Remove outliers if requested
+                    if params['remove_outliers'] and hasattr(df, 'select_dtypes'):
+                        numeric_cols = df.select_dtypes(include=['number']).columns
+                        threshold = params['outlier_threshold']
+                        
+                        for col in numeric_cols:
+                            mean = df[col].mean()
+                            std = df[col].std()
+                            
+                            if std > 0:  # Skip constant columns
+                                lower_bound = mean - (threshold * std)
+                                upper_bound = mean + (threshold * std)
+                                
+                                # Create a mask for non-outliers
+                                mask = (df[col] >= lower_bound) & (df[col] <= upper_bound)
+                                
+                                # Count outliers
+                                outlier_count = (~mask).sum()
+                                if outlier_count > 0:
+                                    logger.info(f"Removed {outlier_count} outliers from {entity_name}.{col}")
+                                    
+                                    # Apply mask to remove outliers
+                                    df = df[mask]
+                    
+                    # Store transformed data
+                    self.transformed_data[entity_name] = df
+                    
+                    # Log transformation results
+                    if hasattr(df, 'shape'):
+                        logger.info(f"Transformed {entity_name}: {df.shape[0]} records, {df.shape[1]} columns")
+                    
+                except Exception as e:
+                    logger.error(f"Error transforming {entity_name}: {str(e)}")
+                    return False
+            
+            # Record operation
+            self.operations_log.append({
+                "operation": "transform_data",
+                "parameters": params,
+                "timestamp": datetime.now().isoformat()
+            })
+            
+            logger.info("Data transformation completed successfully")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error during data transformation: {str(e)}")
+            return False
+    
+    def get_data_for_algorithm(self, entity_names: Optional[List[str]] = None) -> Dict[str, Any]:
+        """
+        Get transformed data ready for algorithm processing.
+        
+        Args:
+            entity_names: Optional list of entity names to include
+                          If None, all transformed entities are included
+            
+        Returns:
+            Dictionary with data keyed by entity name
+        """
+        # Use transformed data if available, otherwise fall back to raw data
+        source_data = self.transformed_data if self.transformed_data else self.raw_data
+        
+        if not source_data:
+            logger.warning("No data available for algorithm")
+            return {}
+        
+        # Filter entities if specified
+        if entity_names:
+            return {
+                entity: data for entity, data in source_data.items()
+                if entity in entity_names
+            }
+        
+        return source_data
+    
+    def merge_entities(self, entity1: str, entity2: str, join_columns: Dict[str, str], 
+                      join_type: str = 'inner') -> Optional[pd.DataFrame]:
+        """
+        Merge two entities based on specified join columns.
+        
+        Args:
+            entity1: Name of the first entity
+            entity2: Name of the second entity
+            join_columns: Dictionary mapping columns from entity1 to entity2
+            join_type: Type of join ('inner', 'left', 'right', 'outer')
+            
+        Returns:
+            Merged DataFrame or None if merge fails
+        """
+        try:
+            logger.info(f"Merging entities: {entity1} and {entity2}")
+            
+            # Get data from transformed if available, otherwise from raw
+            source_data = self.transformed_data if self.transformed_data else self.raw_data
+            
+            # Check if entities exist
+            if entity1 not in source_data or entity2 not in source_data:
+                missing = []
+                if entity1 not in source_data:
+                    missing.append(entity1)
+                if entity2 not in source_data:
+                    missing.append(entity2)
+                    
+                logger.warning(f"Missing entities for merge: {', '.join(missing)}")
+                return None
+            
+            # Get the DataFrames
+            df1 = source_data[entity1]
+            df2 = source_data[entity2]
+            
+            # Check if join columns exist
+            for col1, col2 in join_columns.items():
+                if col1 not in df1.columns:
+                    logger.warning(f"Join column '{col1}' not found in {entity1}")
+                    return None
+                if col2 not in df2.columns:
+                    logger.warning(f"Join column '{col2}' not found in {entity2}")
+                    return None
+            
+            # Prepare column mappings for merge
+            # For each join column pair, rename the column in df2 to match df1
+            rename_map = {}
+            for col1, col2 in join_columns.items():
+                if col1 != col2:
+                    rename_map[col2] = col1
+            
+            # Rename columns in df2 if needed
+            if rename_map:
+                df2_renamed = df2.rename(columns=rename_map)
+            else:
+                df2_renamed = df2
+            
+            # Perform the merge
+            join_cols = list(join_columns.keys())
+            merged = pd.merge(df1, df2_renamed, on=join_cols, how=join_type)
+            
+            logger.info(f"Merged {entity1} and {entity2}: {len(merged)} records")
+            
+            # Record operation
+            self.operations_log.append({
+                "operation": "merge_entities",
+                "parameters": {
+                    "entity1": entity1,
+                    "entity2": entity2,
+                    "join_columns": join_columns,
+                    "join_type": join_type
+                },
+                "result_size": len(merged),
+                "timestamp": datetime.now().isoformat()
+            })
+            
+            return merged
+            
+        except Exception as e:
+            logger.error(f"Error merging entities: {str(e)}")
+            return None
+    
+    def get_entity_info(self) -> Dict[str, Dict[str, Any]]:
+        """
+        Get information about available entities.
+        
+        Returns:
+            Dictionary with entity information
+        """
+        info = {}
+        
+        # Get information from raw data
+        for entity, data in self.raw_data.items():
+            if hasattr(data, 'shape'):
+                info[entity] = {
+                    "source": "raw",
+                    "record_count": data.shape[0],
+                    "column_count": data.shape[1],
+                    "columns": data.columns.tolist(),
+                    "dtypes": {col: str(dtype) for col, dtype in data.dtypes.items()}
+                }
+            else:
+                info[entity] = {
+                    "source": "raw",
+                    "type": str(type(data))
+                }
+        
+        # Add information from transformed data
+        for entity, data in self.transformed_data.items():
+            if entity in info:
+                # Entity exists in raw data, update with transformed info
+                if hasattr(data, 'shape'):
+                    info[entity].update({
+                        "transformed": True,
+                        "transformed_record_count": data.shape[0],
+                        "transformed_column_count": data.shape[1],
+                        "transformed_columns": data.columns.tolist()
+                    })
+            else:
+                # Entity only exists in transformed data
+                if hasattr(data, 'shape'):
+                    info[entity] = {
+                        "source": "transformed",
+                        "record_count": data.shape[0],
+                        "column_count": data.shape[1],
+                        "columns": data.columns.tolist(),
+                        "dtypes": {col: str(dtype) for col, dtype in data.dtypes.items()}
+                    }
+                else:
+                    info[entity] = {
+                        "source": "transformed",
+                        "type": str(type(data))
+                    }
+        
+        return info
+    
+    def save_transformed_data(self, data_manager, entity_prefix: str = "transformed_") -> bool:
+        """
+        Save all transformed data to the data manager.
+        
+        Args:
+            data_manager: The data manager instance
+            entity_prefix: Prefix to add to entity names
+            
+        Returns:
+            True if successful, False otherwise
+        """
+        try:
+            logger.info("Saving transformed data")
+            
+            if not self.transformed_data:
+                logger.warning("No transformed data to save")
+                return False
+            
+            # Track success for each entity
+            success_count = 0
+            
+            for entity_name, data in self.transformed_data.items():
+                try:
+                    # Create a new entity name with prefix
+                    save_name = f"{entity_prefix}{entity_name}"
+                    
+                    # Save the data
+                    data_manager.save_data(save_name, data)
+                    
+                    logger.info(f"Saved transformed data as {save_name}")
+                    success_count += 1
+                    
+                except Exception as e:
+                    logger.error(f"Error saving transformed data for {entity_name}: {str(e)}")
+            
+            all_success = success_count == len(self.transformed_data)
+            
+            if all_success:
+                logger.info("All transformed data saved successfully")
+            else:
+                logger.warning(f"Saved {success_count}/{len(self.transformed_data)} transformed entities")
+            
+            return all_success
+            
+        except Exception as e:
+            logger.error(f"Error saving transformed data: {str(e)}")
+            return False
+
+# Helper functions for data manipulation
+
+def calculate_statistics(data: pd.DataFrame, 
+                        columns: Optional[List[str]] = None) -> Dict[str, Dict[str, float]]:
+    """
+    Calculate basic statistics for specified columns.
+    
+    Args:
+        data: Input DataFrame
+        columns: Optional list of columns to analyze (if None, all numeric columns)
+        
+    Returns:
+        Dictionary with statistics for each column
+    """
+    try:
+        # If no columns specified, use all numeric columns
+        if columns is None:
+            columns = data.select_dtypes(include=['number']).columns.tolist()
+        
+        # Calculate statistics for each column
+        stats = {}
+        for col in columns:
+            if col in data.columns:
+                col_data = data[col].dropna()
+                
+                if len(col_data) > 0:
+                    stats[col] = {
+                        "count": len(col_data),
+                        "mean": float(col_data.mean()),
+                        "median": float(col_data.median()),
+                        "std": float(col_data.std()),
+                        "min": float(col_data.min()),
+                        "max": float(col_data.max()),
+                        "q1": float(col_data.quantile(0.25)),
+                        "q3": float(col_data.quantile(0.75))
+                    }
+                else:
+                    stats[col] = {"count": 0}
+        
+        return stats
+    except Exception as e:
+        logger.error(f"Error calculating statistics: {str(e)}")
+        return {}
+
+def detect_outliers(data: pd.DataFrame, column: str, method: str = 'zscore', 
+                   threshold: float = 3.0) -> Tuple[pd.Series, int]:
+    """
+    Detect outliers in a specified column.
+    
+    Args:
+        data: Input DataFrame
+        column: Column to analyze
+        method: Method for outlier detection ('zscore', 'iqr')
+        threshold: Threshold for outlier detection
+        
+    Returns:
+        Tuple of (outlier mask, outlier count)
+    """
+    try:
+        if column not in data.columns:
+            logger.warning(f"Column {column} not found in data")
+            return pd.Series([False] * len(data)), 0
+        
+        col_data = data[column].dropna()
+        
+        # Different outlier detection methods
+        if method == 'zscore':
+            # Z-score method
+            mean = col_data.mean()
+            std = col_data.std()
+            
+            if std == 0:  # Avoid division by zero
+                return pd.Series([False] * len(data)), 0
+                
+            z_scores = (col_data - mean) / std
+            outliers = (z_scores.abs() > threshold)
+            
+        elif method == 'iqr':
+            # Interquartile Range method
+            q1 = col_data.quantile(0.25)
+            q3 = col_data.quantile(0.75)
+            iqr = q3 - q1
+            
+            lower_bound = q1 - (threshold * iqr)
+            upper_bound = q3 + (threshold * iqr)
+            
+            outliers = (col_data < lower_bound) | (col_data > upper_bound)
+            
+        else:
+            logger.warning(f"Unknown outlier detection method: {method}")
+            return pd.Series([False] * len(data)), 0
+        
+        # Create a full mask aligned with the original DataFrame
+        full_mask = pd.Series([False] * len(data), index=data.index)
+        full_mask.loc[outliers.index] = outliers
+        
+        outlier_count = outliers.sum()
+        
+        return full_mask, outlier_count
+        
+    except Exception as e:
+        logger.error(f"Error detecting outliers: {str(e)}")
+        return pd.Series([False] * len(data)), 0
+
+def generate_summary_report(data_container: DataContainerDescansos) -> Dict[str, Any]:
+    """
+    Generate a summary report of the data container.
+    
+    Args:
+        data_container: The DataContainer instance
+        
+    Returns:
+        Dictionary with summary information
+    """
+    try:
+        report = {
+            "timestamp": datetime.now().isoformat(),
+            "raw_data": {},
+            "transformed_data": {},
+            "operations": data_container.operations_log
+        }
+        
+        # Summarize raw data
+        for entity, data in data_container.raw_data.items():
+            if hasattr(data, 'shape'):
+                report["raw_data"][entity] = {
+                    "record_count": data.shape[0],
+                    "column_count": data.shape[1],
+                    "columns": data.columns.tolist(),
+                    "missing_values": data.isna().sum().sum(),
+                    "memory_usage": data.memory_usage(deep=True).sum()
+                }
+            else:
+                report["raw_data"][entity] = {
+                    "type": str(type(data))
+                }
+        
+        # Summarize transformed data
+        for entity, data in data_container.transformed_data.items():
+            if hasattr(data, 'shape'):
+                report["transformed_data"][entity] = {
+                    "record_count": data.shape[0],
+                    "column_count": data.shape[1],
+                    "columns": data.columns.tolist(),
+                    "missing_values": data.isna().sum().sum(),
+                    "memory_usage": data.memory_usage(deep=True).sum()
+                }
+            else:
+                report["transformed_data"][entity] = {
+                    "type": str(type(data))
+                }
+        
+        # Add validation results if available
+        if hasattr(data_container, 'validation_results'):
+            report["validation_results"] = data_container.validation_results
+        
+        return report
+        
+    except Exception as e:
+        logger.error(f"Error generating summary report: {str(e)}")
+        return {
+            "error": str(e),
+            "timestamp": datetime.now().isoformat()
+        }
