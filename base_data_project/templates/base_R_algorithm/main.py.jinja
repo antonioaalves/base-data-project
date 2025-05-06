@@ -4,6 +4,8 @@
 import click
 import logging
 import sys
+import os
+import subprocess
 from datetime import datetime
 
 # Import base_data_project components
@@ -17,6 +19,35 @@ from src.services.example_service import ExampleService
 
 # Set up logger
 logger = setup_logger(PROJECT_NAME, log_level=logging.INFO)
+
+# Only run this if R_HOME is not already set
+if not os.environ.get('R_HOME'):
+    try:
+        # Try to get R path using R's own command
+        r_path = subprocess.check_output(['R', 'RHOME'], text=True).strip()
+        os.environ['R_HOME'] = r_path
+        print(f"Automatically set R_HOME to {r_path}")
+    except:
+        # Attempt common installation locations
+        possible_paths = [
+            # Windows common paths
+            'C:\\Program Files\\R\\R-4.3.0',
+            'C:\\Program Files\\R\\R-4.2.0',
+            # Mac/Linux common paths
+            '/usr/lib/R',
+            '/usr/local/lib/R',
+            '/Library/Frameworks/R.framework/Resources'
+        ]
+        
+        for path in possible_paths:
+            if os.path.exists(path):
+                os.environ['R_HOME'] = path
+                print(f"Set R_HOME to {path}")
+                break
+        else:
+            print("Warning: Could not automatically detect R installation.")
+            print("Please set R_HOME environment variable manually.")
+            print("Example: export R_HOME=/path/to/R")
 
 @click.group()
 def cli():

@@ -2,12 +2,28 @@
 
 import os
 from pathlib import Path
+import subprocess
 
 # Project name - used for logging and process tracking
 PROJECT_NAME = "{{ project_name_underscores }}"
 
 # Get application root directory
 ROOT_DIR = Path(__file__).resolve().parents[1]
+
+# Try to detect R_HOME if not set
+if 'R_HOME' not in os.environ:
+    try:
+        r_home = subprocess.check_output(['R', 'RHOME'], text=True).strip()
+        os.environ['R_HOME'] = r_home
+    except:
+        pass  # Silently fail, will be caught later when R is actually used
+
+# Add R configuration to CONFIG dictionary
+CONFIG['R'] = {
+    'home': os.environ.get('R_HOME', ''),
+    'required_packages': ['dplyr', 'ggplot2'],  # Add the R packages your project needs
+    'script_dir': os.path.join('src', 'r_scripts')  # Directory for R scripts
+}
 
 CONFIG = {
     # Database configuration
@@ -43,7 +59,12 @@ CONFIG = {
         'ggplot2',
         # Add other R packages here
     ],
-    
+
+    'R': {
+        'home': os.environ.get('R_HOME', ''),
+        'script_dir': os.path.join('src', 'r_scripts')  # Directory for R scripts        
+    },
+     
     # Process configuration - stages and decision points
     'stages': {
         # Stage 1: Data Loading
