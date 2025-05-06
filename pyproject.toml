@@ -24,6 +24,7 @@ dependencies = [
     "jinja2>=3.0.0",
     "pyyaml>=6.0",
     "setuptools>=42.0.0",  # Add setuptools as a dependency
+    "rpy2>=3.5.17"
 ]
 
 [project.optional-dependencies]
