@@ -1,5 +1,3 @@
-# TODO: Implement function logic
-# function arguments should be R dataframes, with their names equal to what is defined in the python data container file, by the specific methods
 
 funcInicializa <- function(matriz2_og, matrizB_og, matrizA_og, startDate, endDate) {
   

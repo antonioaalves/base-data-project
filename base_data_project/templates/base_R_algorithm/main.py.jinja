@@ -72,6 +72,7 @@ def run_process(use_db, no_tracking):
             )
             
             # Run each stage with user interaction
+            # TODO: change to the right stages. implement getting them from config file
             stages = ['data_loading', 'data_transformation', 'processing', 'result_analysis']
             for stage in stages:
                 click.echo(click.style(f"Stage: {stage}", fg="blue", bold=True))

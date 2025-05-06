@@ -9,6 +9,7 @@ import pandas as pd
 import numpy as np
 import rpy2.robjects as ro
 from rpy2.robjects import pandas2ri
+from rpy2.robjects.conversion import localconverter
 from rpy2.robjects.packages import importr
 from rpy2.rinterface_lib.embedded import RRuntimeError
 from typing import Dict, List, Any, Optional, Union, Tuple
@@ -33,11 +34,37 @@ class DataContainerDescansos:
     
     def __init__(self):
         """Initialize an empty data container."""
+
+        # Important auxiliary data
+        self.messages_df = None
+        self.final = None # utilizado para OUT na mesma secção
+        self.valid_emp = None
+        self.main_year = None
+        self.params_algo = {} # consider removing here or in service
+        self.params_external_call = {} # consider removing here or in service
+
         # Raw data storage
-        self.raw_data = {}
+        self.raw_data_og = {
+            'matrizA_df': None,
+            'matrizB_df': None,
+            'matriz2_df': None,
+            'matriz2_previous_df': None,
+            'turnos_df': None,
+            'feriados_df': None,
+            'closed_days': None,
+            'num_feriados_domingos_df': None,
+            'emp_pre_gerados_df': None
+        }
         
         # Transformed data
-        self.transformed_data = {}
+        self.transformed_data_bk = {
+            'matrizA_df': None,
+            'matrizB_df': None,            
+            'matriz2_df': None,
+            'tipo_turno_df': None,
+            'days_list': None,
+            'matriz_day_aloc_df': None,
+        }
 
         # Result data
         self.result_data = {}
@@ -61,6 +88,13 @@ class DataContainerDescansos:
         Returns:
             True if successful, False otherwise
         """
+        # Load messages df, from where?
+        try:
+            messages_path = 'data/Traducoes_algoritmo_horarios_trads.csv'
+            pass
+        except Exception as e:
+            logger.error()
+            return False
         try:
             logger.info("Loading data from data manager")
             
@@ -174,27 +208,57 @@ class DataContainerDescansos:
             logger.error(f"Error during data validation: {str(e)}")
             return False
 
-    def func_inicializa(self, filepath: str = "src/algorithms/R_algorithms/func_inicializa.R") -> bool:
+    def load_from_data_manager_og(self):
+        """
+        Method for loading the specific information from an iteration in the for loop
+        """
+        pass
+
+    def validate_load_data_manager_og(self):
+        pass
+
+    def func_inicializa(self, start_date: str, end_date:str, filepath: str = "src/algorithms/R_algorithms/func_inicializa.R", path_to_helper_functions: str = '') -> bool:
         """
         Func inicializa from R file. Initializes variables. 
         Args:
 
         """
         try:
+            pandas2ri.activate()
             # Convert all pandas DataFrames to R dataframes and assign them to R global env
             dataframes_dict = {
                 # TODO: Define the several dataframes taken as arguments to R function
-                'df1': self.raw_data
+                'matriz2_og': pd.DataFrame(), # probably something like: self.matriz2_og.copy(), depends on where it is saved
+                'matrizB_og': pd.DataFrame(), # probably something like: self.matrizB_og.copy()
+                'matrizA_og': pd.DataFrame() # probably something like: self.matrizA_og.copy()
             }
-            for name, df in dataframes_dict.items():
-                ro.globalenv[name] = pandas2ri.py2rpy(df)
             
+            with localconverter(ro.default_converter + pandas2ri.converter):
+                ro.globalenv['matriz2_og'] = pandas2ri.py2rpy(dataframes_dict.get('matriz2_og', {}))
+                ro.globalenv['matrizB_og'] = pandas2ri.py2rpy(dataframes_dict.get('matrizB_og', {}))
+                ro.globalenv['matrizA_og'] = pandas2ri.py2rpy(dataframes_dict.get('matrizA_og', {}))
+            
+            # Pass non-dataframe variables to R environment
+            ro.globalenv['startDate'] = ro.StrVector([start_date])  # For string
+            ro.globalenv['endDate'] = ro.StrVector([end_date])      # For string
+
+            # If dates are datetime objects, you'd convert differently
+            #from rpy2.robjects import conversion, vectors
+            #ro.globalenv['startDate'] = vectors.FloatVector([conversion.py2rpy(start_date)])
+            #ro.globalenv['endDate'] = vectors.FloatVector([conversion.py2rpy(end_date)])
+
+            # ro.StrVector([string_value]) for strings
+            # ro.IntVector([int_value]) for integers
+            # ro.FloatVector([float_value]) for floats
+            # ro.BoolVector([bool_value]) for booleans
+
             # Source the R script
             ro.r(f'source("{filepath}")')
+            ro.r(f'source("{path_to_helper_functions}")') # If it needs to load other functions, it can be done inside the R script, analyse whats best
             
             # If your R script has a main function, you can call it
-            # Assuming the R script has a function called "func_inicializa" that returns results
-            result = ro.r['func_inicializa']()
+            # Assuming the R script has a function called "funcInicializa" that returns results
+            result = ro.r['funcInicializa']()
             
             # Convert results back to Python/pandas objects
             # This depends on what your R script returns
@@ -228,7 +292,7 @@ class DataContainerDescansos:
             logger.error(f"Error validating func_inicializa from data manager: {str(e)}")
             return False
 
-    def allocation_cycle(self, filepath: str = "src/algorithms/R_algorithms/allocation_cycle.R") -> bool:
+    def allocation_cycle(self, filepath: str = "src/algorithms/R_algorithms/allocation_cycle.R", path_to_helper_functions: str = '') -> bool:
         """
         Running the actual allocation cycle from R file. Initializes variables. 
         Args:
@@ -251,7 +315,8 @@ class DataContainerDescansos:
             # If your R script has a main function, you can call it
             # Assuming the R script has a function called "func_inicializa" that returns results
             result = ro.r['allocation_cycle']()
-            
+            ro.r(f'source("{path_to_helper_functions}")') # If it needs to load other functions, it can be done inside the R script, analyse whats best
+
             # Convert results back to Python/pandas objects
             # This depends on what your R script returns
             if isinstance(result, ro.vectors.ListVector):

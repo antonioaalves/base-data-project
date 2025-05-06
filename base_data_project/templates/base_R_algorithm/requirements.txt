@@ -4,3 +4,4 @@ sqlalchemy>=1.4.0
 click>=8.0.0
 numpy>=1.21.0
 flask>=2.0.0  # Optional: only needed if using the API server
+rpy2==3.5.17

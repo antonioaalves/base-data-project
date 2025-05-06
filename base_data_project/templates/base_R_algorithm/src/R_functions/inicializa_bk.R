@@ -1,10 +1,8 @@
-# TODO: Implement function logic
-# function arguments should be R dataframes, with their names equal to what is defined in the python data container file, by the specific methods
 
 funcInicializa <- function(matriz2_og, matrizB_og, matrizA_og, startDate, endDate) {
-  
-  # startDate <- startDate2
-  # endDate <- endDate2
+# 
+#   startDate <- startDate2
+#   endDate <- endDate2
   
   ano <- year(min(matrizB_og$DATA))
   matrizB_ini <- matrizB_og %>% 
@@ -120,8 +118,7 @@ funcInicializa <- function(matriz2_og, matrizB_og, matrizA_og, startDate, endDat
   
   matrizA_og <- matrizA_og %>% filter(MATRICULA != "") 
   df_merge_count_dom_fes <- data.frame(MATRICULA = character(), TOTAL_DOM_FES = numeric())
-  df_merge_count_fes <- data.frame(MATRICULA = character(), TOTAL_FES = numeric())
-  df_merge_count_holidays <- data.frame(MATRICULA = character(), TOTAL_HOLIDAYS = numeric())
+  df_merge_count_sund_holidays <- data.frame(MATRICULA = character(), TOTAL_SUNDAY_HOLIDAYS = numeric())
   ################################
   # Confirma que na matriz2 cada #
   # Vez que há um V marcado está #
@@ -142,50 +139,29 @@ funcInicializa <- function(matriz2_og, matrizB_og, matrizA_og, startDate, endDat
   
   ##AVALIAR SE 'V' DEVE SER CONTABILIZADO PARA DESCONTAR NOS L_TOTAL OU NAO!!!
   ## L e V so deve ser descontado na Almcapo
-  ## na sabeco so se desconta os L
+  ## na sabeco so se deconta os L
   
   if (unique(matrizA_og$CONVENIO) =='ALCAMPO') {
     for (matricula in matrizA_og$MATRICULA) {
       count_occurrences <- 0
       count_sundaysInHolidays <- 0
-      tipo_contrato <-  matrizA_og %>% 
-        dplyr::filter(MATRICULA == matricula) %>% .$TIPO_CONTRATO
       matriz_temp <- matriz2 %>% 
         dplyr::filter(COLABORADOR == matricula)
-      
-      if (tipo_contrato %in% c(4,5)) {
-        count_occurrences <- matriz_temp %>% 
-          dplyr::filter(HORARIO %in% c('L','V') & ( WDAY == 1 )) %>%
-          # dplyr::filter(HORARIO %in% c('L') & ( WDAY == 1 | DATA %in% domEfes$DATA)) %>% 
-          nrow()
-        count_occurrences_fes <- matriz_temp %>% 
-          dplyr::filter(HORARIO %in% c('L','V') & ( DATA %in% domEfes$DATA )) %>%
-          # dplyr::filter(HORARIO %in% c('L') & ( WDAY == 1 | DATA %in% domEfes$DATA)) %>% 
-          nrow()
-        count_Holidays <- matriz_temp %>% 
-          dplyr::filter(HORARIO %in% c('V')) %>%
-          # dplyr::filter(HORARIO %in% c('L') & ( WDAY == 1 | DATA %in% domEfes$DATA)) %>% 
-          nrow()
-      } else{
-        count_occurrences <- matriz_temp %>% 
-          dplyr::filter(HORARIO %in% c('L','V') & ( WDAY == 1 | DATA %in% domEfes$DATA)) %>%
-          # dplyr::filter(HORARIO %in% c('L') & ( WDAY == 1 | DATA %in% domEfes$DATA)) %>% 
-          nrow()
-        count_occurrences_fes <- 0
-        count_Holidays <- 0
-      }
-
-
+      count_occurrences <- matriz_temp %>% 
+        dplyr::filter(HORARIO %in% c('L','V') & ( WDAY == 1 | DATA %in% domEfes$DATA)) %>%
+        # dplyr::filter(HORARIO %in% c('L') & ( WDAY == 1 | DATA %in% domEfes$DATA)) %>% 
+        nrow()
+      count_sundaysInHolidays <- matriz_temp %>% 
+        dplyr::filter(HORARIO %in% c('V') & ( WDAY == 1 | DATA %in% domEfes$DATA)) %>%
+        # dplyr::filter(HORARIO %in% c('L') & ( WDAY == 1 | DATA %in% domEfes$DATA)) %>% 
+        nrow()
       temp_df <- data.frame(MATRICULA = matricula, TOTAL_DOM_FES = count_occurrences )
-      temp_df_fes <- data.frame(MATRICULA = matricula, TOTAL_FES = count_occurrences_fes )
-      temp_df_Holidays <-  data.frame(MATRICULA = matricula, TOTAL_HOLIDAYS = count_Holidays )
+      temp_df_sunHolidays <-  data.frame(MATRICULA = matricula, TOTAL_SUNDAY_HOLIDAYS = count_sundaysInHolidays )
       df_merge_count_dom_fes <- rbind(df_merge_count_dom_fes, temp_df)
-      df_merge_count_fes <- rbind(df_merge_count_fes, temp_df_fes)
-      df_merge_count_holidays <- rbind(df_merge_count_holidays, temp_df_Holidays)
+      df_merge_count_sund_holidays <- rbind(df_merge_count_sund_holidays, temp_df_sunHolidays)
       
       
-      
-      print(paste(matricula, count_occurrences,count_occurrences_fes,count_Holidays))
+      print(paste(matricula, count_occurrences))
       
     }
   }else{
@@ -211,19 +187,15 @@ funcInicializa <- function(matriz2_og, matrizB_og, matrizA_og, startDate, endDat
   
   df_merge_count_dom_fes <- df_merge_count_dom_fes %>% filter(MATRICULA != "") 
   df_merge_count_dom_fes <- distinct(df_merge_count_dom_fes)
-  df_merge_count_fes <- df_merge_count_fes %>% filter(MATRICULA != "") 
-  df_merge_count_fes <- distinct(df_merge_count_fes)
-  df_merge_count_holidays <- df_merge_count_holidays %>% filter(MATRICULA!="")
-  df_merge_count_holidays <- distinct(df_merge_count_holidays)
+  df_merge_count_sund_holidays <- df_merge_count_sund_holidays %>% filter(MATRICULA!="")
+  df_merge_count_sund_holidays <- distinct(df_merge_count_sund_holidays)
   
   
   matrizA_og <- distinct(matrizA_og)
   matrizA_og <- merge(matrizA_og, df_merge_count_dom_fes, by = 'MATRICULA')
-  matrizA_og <- merge(matrizA_og, df_merge_count_fes, by = 'MATRICULA')
-  matrizA_og <- merge(matrizA_og, df_merge_count_holidays, by = 'MATRICULA')
+  matrizA_og <- merge(matrizA_og, df_merge_count_sund_holidays, by = 'MATRICULA')
   matrizA_og$TOTAL_DOM_FES <- matrizA_og$TOTAL_DOM_FES/2
-  matrizA_og$TOTAL_FES <- matrizA_og$TOTAL_FES/2
-  matrizA_og$TOTAL_HOLIDAYS <- matrizA_og$TOTAL_HOLIDAYS/2
+  matrizA_og$TOTAL_SUNDAY_HOLIDAYS <- matrizA_og$TOTAL_SUNDAY_HOLIDAYS/2
   
   ## FIM Liberancas de Domingo ---------------------------------------------------
   
@@ -413,8 +385,7 @@ funcInicializa <- function(matriz2_og, matrizB_og, matrizA_og, startDate, endDat
   
   
   matrizA_og <- matrizA_og %>% 
-    merge(countLDTst, by.x = "MATRICULA", by.y = "COLABORADOR", all.x = T) %>% 
-    dplyr::mutate_all(~ ifelse(is.na(.), 0, .))
+    merge(countLDTst, by.x = "MATRICULA", by.y = "COLABORADOR")
   
   
   matrizA_og<- matrizA_og %>% 
@@ -424,13 +395,10 @@ funcInicializa <- function(matriz2_og, matrizB_og, matrizA_og, startDate, endDat
       ## tratar LD ---------------
       LD = max(LD - LD_at,0),
       ## tratar L_DOM ---------------
-      L_DOM = L_DOM - TOTAL_DOM_FES - TOTAL_FES, #- 4
-     
+      L_DOM = L_DOM - TOTAL_DOM_FES, #- 4
       # matrizA_og$LD <- matrizA_og$DyF_MAX_T
       L_TOTAL = L_TOTAL - TOTAL_DOM_FES,
-      ## tratar Ferias ----------
-      L_TOTAL = L_TOTAL - custom_round(TOTAL_HOLIDAYS/7),
-      
+
       ## tratar C2D e C3D ---------------
       L_TOTAL = L_TOTAL - C2D_at,
       C2D = max(C2D - C2D_at,0),
@@ -439,7 +407,7 @@ funcInicializa <- function(matriz2_og, matrizB_og, matrizA_og, startDate, endDat
       C3D = max(C3D - C3D_at,0),
       
       ## L_RES TRATADO MAIS A FRENTE ---------------,
-    ) %>% ungroup()
+    )
   
   
   matrizA <- matrizA_og %>%  select(UNIDADE,SECAO,POSTO, FK_COLABORADOR,MATRICULA, OUT,
@@ -512,7 +480,7 @@ funcInicializa <- function(matriz2_og, matrizB_og, matrizA_og, startDate, endDat
   ########################################################
   ########################################################
   matrizA <- matrizA %>% 
-    # dplyr::filter(!is.na(L_TOTAL), L_TOTAL > 0) %>%
+    dplyr::filter(!is.na(L_TOTAL), L_TOTAL > 0) %>%
     dplyr::mutate_all(~ ifelse(is.na(.), 0, .)) %>% 
     dplyr::select(-count) %>%
     mutate_all(~replace(., . < 0, 0))
@@ -548,8 +516,8 @@ funcInicializa <- function(matriz2_og, matrizB_og, matrizA_og, startDate, endDat
     dplyr::mutate(HORARIO = ifelse(HORARIO == 'L', 'L_', HORARIO))
   
   
-  matrizA_bk_OG <- matrizA %>% dplyr::mutate(L_RES = L_TOTAL-L_DOM-L_D-L_Q-L_QS-C2D-C3D-CXX-VZ-LRES_at,
-                                             L_TOTAL = L_TOTAL - LRES_at) %>% dplyr::select(-LRES_at)
+  matrizA_bk_OG <- matrizA %>% dplyr::mutate(L_RES = L_TOTAL-L_DOM-L_D-L_Q-L_QS-C2D-C3D-CXX-VZ,#L_TOTAL = L_TOTAL - LRES_at
+                                             ) %>% dplyr::select(-LRES_at)
  
   matrizA_bk <- matrizA %>% dplyr::mutate(L_RES = L_TOTAL-L_DOM-L_D-L_Q-L_QS-C2D-C3D-CXX-VZ-LRES_at,
                                           L_TOTAL = L_TOTAL - LRES_at) %>% dplyr::select(-LRES_at)
@@ -577,7 +545,7 @@ funcInicializa <- function(matriz2_og, matrizB_og, matrizA_og, startDate, endDat
   
   matriz2 <- matriz2 %>% 
     dplyr::left_join(matriz2_TipoTurnoFix, by = 'WW') %>% 
-    dplyr::mutate(TIPO_TURNO = case_when(TIPO_TURNO == 'NL' ~ TIPO_TURNO_FIX,
+    dplyr::mutate(TIPO_TURNO = case_when((TIPO_TURNO == 'NL' & !is.na(TIPO_TURNO_FIX))  ~ TIPO_TURNO_FIX,
                                           TRUE ~ TIPO_TURNO))
   matriz2_bk <- matriz2 
   
@@ -663,22 +631,6 @@ funcInicializa <- function(matriz2_og, matrizB_og, matrizA_og, startDate, endDat
     if (mmA$CICLO == 'COMPLETO') {
       
       mmA[, 9:ncol(mmA)] <- 0
-      
-      matrizA_bk <- matrizA_bk %>% 
-        dplyr::filter(MATRICULA != colab) %>% 
-        dplyr::bind_rows(mmA)
-    }
-    
-    if (mmA$TIPO_CONTRATO %in% c(4,5) & mmA$CXX > 0) {
-      
-      mmA$L_RES2 <- mmA$L_RES - mmA$CXX
-      mmA$L_RES <- mmA$CXX
-      
-      matrizA_bk <- matrizA_bk %>% 
-        dplyr::filter(MATRICULA != colab) %>% 
-        dplyr::bind_rows(mmA)
-    } else{
-      mmA$L_RES2 <- 0
       
       matrizA_bk <- matrizA_bk %>% 
         dplyr::filter(MATRICULA != colab) %>% 

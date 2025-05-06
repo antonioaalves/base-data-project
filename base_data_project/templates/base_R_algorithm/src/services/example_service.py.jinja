@@ -41,6 +41,7 @@ class ExampleService:
             data_manager: Data manager for data operations
             process_manager: Optional process manager for tracking
         """
+        # TODO: analyse where it goes best, here or associated with the data container
         self.data_manager = data_manager
         self.process_manager = process_manager
         self.current_process_id = None
@@ -294,6 +295,7 @@ class ExampleService:
         try:
             stage_name = 'processing'
             decisions = {}
+            # TODO: check if it should exit the loop if anything fails or continue
             if self.stage_handler and self.process_manager:
                 stage_sequence = self.stage_handler.stages[stage_name]['sequence']
                 insert_results = self.process_manager.current_decisions.get(stage_sequence).get('insertions', {}).get('insert_results', False)
@@ -305,7 +307,7 @@ class ExampleService:
                 if self.stage_handler:
                     self.stage_handler.track_progress(
                         stage_name=stage_name,
-                        progress=progress+0.1,
+                        progress=(progress+0.1)/len(self.postos_id),
                         message="Starting the processing stage and consequent substages"
                     )
                 # SUBSTAGE 1: connection
@@ -321,7 +323,7 @@ class ExampleService:
                 if self.stage_handler:
                     self.stage_handler.track_progress(
                         stage_name=stage_name,
-                        progress=progress+0.2,
+                        progress=(progress+0.2)/len(self.postos_id),
                         message="Valid connection established, advancing to next substage"
                     )
 
@@ -340,7 +342,7 @@ class ExampleService:
                 if self.stage_handler:
                     self.stage_handler.track_progress(
                         stage_name=stage_name,
-                        progress=progress+0.3,
+                        progress=(progress+0.3)/len(self.postos_id),
                         message="Valid matrices loading, advancing to the next substage"
                     )
 
@@ -359,7 +361,7 @@ class ExampleService:
                 if self.stage_handler:
                     self.stage_handler.track_progress(
                         stage_name=stage_name,
-                        progress=progress+0.4,
+                        progress=(progress+0.4)/len(self.postos_id),
                         message="Valid func_inicializa, advancing to the next substage"
                     )
 
@@ -378,7 +380,7 @@ class ExampleService:
                 if self.stage_handler:
                     self.stage_handler.track_progress(
                         stage_name=stage_name,
-                        progress=progress+0.5,
+                        progress=(progress+0.5)/len(self.postos_id),
                         message="Valid allocation_cycle, advancing to the next substage"
                     )
 
@@ -397,7 +399,7 @@ class ExampleService:
                 if self.stage_handler:
                     self.stage_handler.track_progress(
                         stage_name=stage_name,
-                        progress=progress+0.6,
+                        progress=(progress+0.6)/len(self.postos_id),
                         message="Valid format_results, advancing to the next substage"
                     )
 
@@ -417,9 +419,10 @@ class ExampleService:
                     if self.stage_handler:
                         self.stage_handler.track_progress(
                             stage_name=stage_name,
-                            progress=progress+0.7,
+                            progress=(progress+0.7)/len(self.postos_id),
                             message="Valid insert_results, advancing to the next substage"
                         )
+                        progress += 1
 
             # TODO: Needs to ensure it inserted it correctly?
             if self.stage_handler:
@@ -503,7 +506,9 @@ class ExampleService:
             return False
 
         try:
-            success = self.data.load_from_data_manager(self.data_manager)
+            entities = [] # TODO: list of entities to load
+
+            success = self.data.load_from_data_manager(self.data_manager, entities)
             # TODO: needs to be removed or just logged
             if not success:
                 logger.warning("Loading matrices unsuccessful, returning false.")
