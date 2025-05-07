@@ -1,0 +1,1 @@
+INSERT INTO WFM.CORE_PRE_SCHEDULE_ALGORITHM (employee_id, schedule_day, approved, type, subtype, option_n2) VALUES (?,to_date(?,'YYYY-MM-DD'),?,?,?,?)

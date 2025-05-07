@@ -14,8 +14,14 @@ pip install base-data-project
 
 ### From GitHub Repository
 
+Install from main branch
 ```bash
 pip install git+https://github.com/antonioaalves/base-data-project.git
+```
+
+Install from a specific branch
+```bash
+pip install git+https://github.com/antonioaalves/base-data-project.git@branch-name
 ```
 
 ### From Local source

@@ -1,0 +1,178 @@
+"""Configuration for the {{ project_name }} project."""
+
+import os
+from pathlib import Path
+import subprocess
+
+# Project name - used for logging and process tracking
+PROJECT_NAME = "{{ project_name_underscores }}"
+
+# Get application root directory
+ROOT_DIR = Path(__file__).resolve().parents[1]
+
+# Try to detect R_HOME if not set
+if 'R_HOME' not in os.environ:
+    try:
+        r_home = subprocess.check_output(['R', 'RHOME'], text=True).strip()
+        os.environ['R_HOME'] = r_home
+    except:
+        pass  # Silently fail, will be caught later when R is actually used
+
+# Add R configuration to CONFIG dictionary
+
+CONFIG = {
+    # Database configuration
+    'use_db': False,
+    'db_url': f"sqlite:///{os.path.join(ROOT_DIR, 'data', 'production.db')}",
+    
+    # Base directories
+    'data_dir': os.path.join(ROOT_DIR, 'data'),
+    'output_dir': os.path.join(ROOT_DIR, 'data', 'output'),
+    'log_dir': os.path.join(ROOT_DIR, 'logs'),
+    
+    # File paths for CSV data sources
+    'dummy_data_filepaths': {
+        # Example data files mapping - replace with your actual data files
+        'employees': os.path.join(ROOT_DIR, 'data', 'csvs', 'employee_matrix.csv'),
+        'transactions': os.path.join(ROOT_DIR, 'data', 'csvs', 'transactions.csv'),
+        'products': os.path.join(ROOT_DIR, 'data', 'csvs', 'products.csv'),
+    },
+    
+    'available_entities': {
+        'messages_df': 'table_name'
+
+    },
+
+    # Available algorithms for the project
+    'available_algorithms': [
+        'example_algorithm',
+        # Add your custom algorithms here
+    ],
+
+    # R package names
+    'packnames': [
+        'ggplot2',
+        # Add other R packages here
+    ],
+
+    'R': {
+        'home': os.environ.get('R_HOME', ''),
+        'script_dir': os.path.join('src', 'r_scripts')  # Directory for R scripts        
+    },
+     
+    # Process configuration - stages and decision points
+    'stages': {
+        # Stage 1: Data Loading
+        'data_loading_raw': {
+            'sequence': 1,               # Stage order
+            'requires_previous': False,  # First stage doesn't require previous stages
+            'validation_required': True, # Validate data after loading (normally performed by a method associated with the data container in src/models.py)
+            'decisions': {
+                'selections': {          # Decision point for data selection
+                    'selected_entities': ['valid_employees'],  # Default entities to load
+                    'load_all': False,   # Whether to load all available entities
+                },
+                'params_algo': {
+                    'param_pessoas_objetivo': 0.5,
+                    'param_NLDF': 2,
+                    'param_NL10': 0,
+                    'param_relax_colabs': 2
+                },
+                'params_external_call': {
+                    'api_proc_id': 999,
+                    'wfm_user': 'WFM',
+                    'wfm_proc_id': 59293,
+                    'data_ini': '30-12-2024',
+                    'data_fim': '04-01-2026',
+                    'wfm_proc_colab': 'NA',
+                    'childNumber': 'debug'
+                }  
+            }
+        },
+        
+        # Stage 2: Data Transformation
+        'processing': {
+            'sequence': 2,
+            'requires_previous': True,   # Requires previous stage completion
+            'validation_required': True,
+            'decisions': {
+                'transformations': {     # Decision point for transformation options
+                    'apply_filtering': False,
+                    'filter_column': '',
+                    'filter_value': '',
+                    'normalize_numeric': True,  # Whether to normalize numerical data
+                    'fill_missing': True,       # Whether to fill missing values
+                    'fill_method': 'mean'       # Method for filling missing values
+                },
+                'insertions': {
+                    'insert_results': False
+                }
+            },
+            'substages': {
+                'connection': {
+                    'sequence': 1,
+                    'description': 'Establishing connection to data source',
+                    'required': True,
+                    'decisions': {}
+                },
+                'load_matrices': {
+                    'sequence': 2,
+                    'description': 'Load dataframes containing all the data',
+                    'required': True,
+                    'decisions': {}                  
+                },
+                'func_inicializa': {
+                    'sequence': 3,
+                    'description': 'Function that initializes data transformation for each matrix',
+                    'required': True,
+                    'decisions': {}                     
+                },
+                'allocation_cycle': {
+                    'sequence': 4,
+                    'description': 'Allocation cycle for all the required days.',
+                    'required': True,
+                    'decisions': {}                     
+                },
+                'format_results': {
+                    'sequence': 5,
+                    'description': 'Format results to be inserted',
+                    'required': True,
+                    'decisions': {}
+                },
+                'insert_results': {
+                    'sequence': 6,
+                    'description': 'Insert results to the database',
+                    'required': False,
+                    'decisions': {}
+                }
+            },
+            'auto_complete_on_substages': True, # Auto-complete stage when all substages are done
+        },
+        
+
+    },
+    
+    # Algorithm parameters (defaults for each algorithm)
+    'algorithm_defaults': {
+        'example_algorithm': {
+            'threshold': 50.0,
+            'include_outliers': False,
+            'outlier_threshold': 2.0
+        },
+        # Add defaults for your custom algorithms here
+    },
+    
+    # Output configuration
+    'output': {
+        'base_dir': 'data/output',
+        'visualizations_dir': 'data/output/visualizations',
+        'diagnostics_dir': 'data/diagnostics'
+    },
+    
+    # Logging configuration
+    'log_level': 'INFO',
+    'log_format': '%(asctime)s | %(levelname)8s | %(filename)s:%(lineno)d | %(message)s',
+    'log_dir': 'logs'
+}
+
+# Add any project-specific configuration below
