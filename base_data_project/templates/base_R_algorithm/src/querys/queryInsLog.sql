@@ -1,0 +1,1 @@
+insert into wfm.log_integration (int_type,msg_type,int_program,msg_log,create_date,create_user) values (:IT,:MT,:IP,:ML,to_date(:CD,'yyyy-mm-dd'),:CU)

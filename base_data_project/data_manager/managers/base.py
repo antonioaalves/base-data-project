@@ -63,7 +63,7 @@ class BaseDataManager(ABC):
         pass
 
     @abstractmethod
-    def save_data(self, entity: str, data: pd.DataFrame, **kwargs) -> None:
+    def save_data(self, entity: str, data: pd.DataFrame, **kwargs) -> bool:
         """
         Save data for a specific entity.
         

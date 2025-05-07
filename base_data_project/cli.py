@@ -43,17 +43,16 @@ def list_templates():
         print(f"  - {template}: {description}")
 
 def init_project(project_name, template='base_project', custom_config=None):
-    """Initialize a new project from a template."""
-    if os.path.exists(project_name):
-        logger.error(f"Directory '{project_name}' already exists")
-        return False
+    """Initialize a new project from a template in the current directory."""
+    # Always use current directory
+    target_dir = os.getcwd()
     
     try:
         # Get template directory
         template_dir = get_template_dir(template)
         
-        # Create project directory
-        os.makedirs(project_name)
+        # Log what we're doing
+        logger.info(f"Initializing project '{project_name}' with template '{template}' in current directory")
         
         # Copy template files
         for root, dirs, files in os.walk(template_dir):
@@ -64,7 +63,7 @@ def init_project(project_name, template='base_project', custom_config=None):
             
             # Create subdirectories
             for dir_name in dirs:
-                dir_path = os.path.join(project_name, rel_path, dir_name)
+                dir_path = os.path.join(target_dir, rel_path, dir_name)
                 os.makedirs(dir_path, exist_ok=True)
             
             # Copy files
@@ -83,7 +82,7 @@ def init_project(project_name, template='base_project', custom_config=None):
                 else:
                     dest_file_name = file_name
                 
-                dest_file = os.path.join(project_name, rel_path, dest_file_name)
+                dest_file = os.path.join(target_dir, rel_path, dest_file_name)
                 
                 if is_template:
                     # Render template
@@ -112,20 +111,18 @@ def init_project(project_name, template='base_project', custom_config=None):
                     shutil.copy2(src_file, dest_file)
         
         # Create empty directories required for project
-        os.makedirs(os.path.join(project_name, 'data', 'csvs'), exist_ok=True)
-        os.makedirs(os.path.join(project_name, 'data', 'output'), exist_ok=True)
-        os.makedirs(os.path.join(project_name, 'logs'), exist_ok=True)
+        os.makedirs(os.path.join(target_dir, 'data', 'csvs'), exist_ok=True)
+        os.makedirs(os.path.join(target_dir, 'data', 'output'), exist_ok=True)
+        os.makedirs(os.path.join(target_dir, 'logs'), exist_ok=True)
         
         logger.info(f"Project '{project_name}' initialized successfully from template '{template}'")
         return True
     
     except Exception as e:
         logger.error(f"Error initializing project: {str(e)}")
-        # Clean up on failure
-        if os.path.exists(project_name):
-            shutil.rmtree(project_name)
         return False
-
+    
+    
 def main():
     """Main CLI entry point."""
     parser = argparse.ArgumentParser(description="Base Data Project framework CLI")
