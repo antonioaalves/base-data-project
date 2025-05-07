@@ -1,14 +1,22 @@
-""""""
+"""Factory for creating data container instances."""
 
-# Dependencies
-from typing import Any, Dict
+import logging
+from typing import Any, Dict, Optional
 
-# Local stuff
-from base_data_project.storage.containers import BaseDataContainer
+from base_data_project.storage.containers import (
+    BaseDataContainer,
+    MemoryDataContainer,
+    CSVDataContainer,
+    DBDataContainer,
+    HybridDataContainer
+)
 
 class DataContainerFactory:
     """
-    Factory for creating data container instances.
+    Factory for creating data container instances based on configuration.
+    
+    This class provides a central point for instantiating different types 
+    of data containers while ensuring proper configuration.
     """
     
     @staticmethod
@@ -17,29 +25,56 @@ class DataContainerFactory:
         Create a data container based on configuration.
         
         Args:
-            config: Configuration dictionary
+            config: Configuration dictionary with storage strategy settings
             
         Returns:
-            Initialized data container
+            Configured data container instance
         """
+        # Get project name for logging
+        project_name = config.get('PROJECT_NAME', 'base_data_project')
+        logger = logging.getLogger(project_name)
+        
+        # Get storage strategy from config
         storage_strategy = config.get('storage_strategy', {'mode': 'memory'})
         mode = storage_strategy.get('mode', 'memory')
         
+        # Create container based on mode
         if mode == 'memory':
-            from base_data_project.storage.containers import MemoryDataContainer
+            logger.info("Creating memory data container")
             return MemoryDataContainer(storage_strategy)
+            
         elif mode == 'persist':
             persist_format = storage_strategy.get('persist_format', 'csv')
+            
             if persist_format == 'csv':
-                from base_data_project.storage.containers import CSVDataContainer
+                logger.info("Creating CSV data container")
                 return CSVDataContainer(storage_strategy)
             else:
-                from base_data_project.storage.containers import DBDataContainer
+                logger.info("Creating database data container")
                 return DBDataContainer(storage_strategy)
+                
         elif mode == 'hybrid':
-            from base_data_project.storage.containers import HybridDataContainer
+            logger.info("Creating hybrid data container")
             return HybridDataContainer(storage_strategy)
+            
         else:
-            # Default to memory
-            from base_data_project.storage.containers import MemoryDataContainer
+            # Default to memory if mode is unknown
+            logger.warning(f"Unknown storage mode '{mode}', defaulting to memory storage")
             return MemoryDataContainer(storage_strategy)
+    
+    @staticmethod
+    def get_default_config() -> Dict[str, Any]:
+        """
+        Get default storage configuration.
+        
+        Returns:
+            Dictionary with default storage configuration
+        """
+        return {
+            'mode': 'memory',
+            'persist_intermediate_results': False,
+            'stages_to_persist': [],
+            'cleanup_policy': 'keep_latest',
+            'persist_format': 'csv',
+            'storage_dir': 'data/intermediate'
+        }

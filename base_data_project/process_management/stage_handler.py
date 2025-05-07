@@ -12,6 +12,7 @@ from base_data_project.process_management.exceptions import (
     InvalidStageSequenceError,
     DependencyError
 )
+from base_data_project.storage.factory import DataContainerFactory
 
 class ProcessStageHandler:
     """
@@ -324,6 +325,25 @@ class ProcessStageHandler:
             except Exception as e:
                 # Log but don't fail if tracking fails
                 self.logger.warning(f"Error tracking stage completion: {str(e)}")
+            
+        if success and result_data and hasattr(self, 'data_container'):
+            try:
+                metadata = {
+                    'process_id': self.current_process_id,
+                    'timestamp': datetime.now().isoformat(),
+                    'stage_name': stage_name,
+                    'status': 'completed'
+                }
+                
+                self.data_container.store_stage_data(
+                    stage_name=stage_name,
+                    data=result_data,
+                    metadata=metadata
+                )
+                
+                self.logger.info(f"Stored intermediate data for stage {stage_name}")
+            except Exception as e:
+                self.logger.warning(f"Failed to store intermediate data: {str(e)}")
         
         return stage
     
