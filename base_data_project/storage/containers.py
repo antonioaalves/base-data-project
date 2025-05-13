@@ -685,30 +685,332 @@ class CSVDataContainer(BaseDataContainer):
 class DBDataContainer(BaseDataContainer):
     """
     Data container that stores intermediate data in a database.
-    (Placeholder for future implementation)
     """
     
     def __init__(self, config: Dict[str, Any]):
-        super().__init__(config)
-        self.logger.warning("DBDataContainer is not fully implemented yet. Falling back to memory storage.")
+        """
+        Initialize the database data container.
         
-        # For now, just delegate to MemoryDataContainer
-        self._memory_container = MemoryDataContainer(config)
+        Args:
+            config: Configuration dictionary with storage settings
+        """
+        super().__init__(config)
+        
+        # Extract database configuration
+        self.db_url = config.get('db_url')
+        
+        if not self.db_url:
+            # Default to SQLite if no URL provided
+            import os
+            storage_dir = config.get('storage_dir', 'data/intermediate')
+            os.makedirs(storage_dir, exist_ok=True)
+            self.db_url = f"sqlite:///{os.path.join(storage_dir, 'intermediate_data.db')}"
+        
+        self.logger.info(f"Initializing database data container with URL: {self.db_url}")
+        
+        # Initialize database
+        self._initialize_database()
+    
+    def _initialize_database(self):
+        """Initialize the database connection and tables."""
+        try:
+            from sqlalchemy import create_engine, Column, Integer, String, LargeBinary, DateTime, Text
+            from sqlalchemy.ext.declarative import declarative_base
+            from sqlalchemy.orm import sessionmaker
+            import datetime
+            
+            # Create engine
+            self.engine = create_engine(self.db_url)
+            
+            # Create base class for models
+            Base = declarative_base()
+            
+            # Define the intermediate data table
+            class IntermediateData(Base):
+                __tablename__ = 'intermediate_data'
+                
+                id = Column(Integer, primary_key=True)
+                storage_key = Column(String(255), unique=True, index=True)
+                process_id = Column(String(255), index=True)
+                stage_name = Column(String(255), index=True)
+                timestamp = Column(DateTime, default=datetime.datetime.now)
+                data = Column(LargeBinary)  # Serialized data
+                metadata = Column(Text)  # JSON string of metadata
+                
+            # Create tables
+            Base.metadata.create_all(self.engine)
+            
+            # Create session
+            Session = sessionmaker(bind=self.engine)
+            self.session = Session()
+            
+            # Store model class for later use
+            self.IntermediateData = IntermediateData
+            
+            self.logger.info("Database initialized successfully")
+            
+        except Exception as e:
+            self.logger.error(f"Failed to initialize database: {str(e)}")
+            raise            
     
     def store_stage_data(self, stage_name: str, data: Any, metadata: Optional[Dict[str, Any]] = None) -> str:
-        return self._memory_container.store_stage_data(stage_name, data, metadata)
+        """
+        Store data in the database.
+        
+        Args:
+            stage_name: Name of the stage
+            data: The data to store
+            metadata: Additional context information
+            
+        Returns:
+            Storage key (identifier) for the data
+        """
+        try:
+            import pickle
+            import json
+            import uuid
+            from datetime import datetime
+            
+            metadata = metadata or {}
+            process_id = metadata.get('process_id', 'default')
+            timestamp = datetime.now()
+            
+            # Generate a unique storage key
+            storage_key = f"{process_id}_{stage_name}_{timestamp.strftime('%Y%m%d%H%M%S')}"
+            
+            # Serialize data
+            data_pickle = pickle.dumps(data)
+            
+            # Create database record
+            intermediate_data = self.IntermediateData(
+                storage_key=storage_key,
+                process_id=process_id,
+                stage_name=stage_name,
+                timestamp=timestamp,
+                data=data_pickle,
+                metadata=json.dumps(metadata)
+            )
+            
+            # Save to database
+            self.session.add(intermediate_data)
+            self.session.commit()
+            
+            self.logger.info(f"Stored data for stage '{stage_name}' with key: {storage_key}")
+            return storage_key
+            
+        except Exception as e:
+            self.session.rollback()
+            self.logger.error(f"Error storing data in database: {str(e)}")
+            raise
         
     def retrieve_stage_data(self, stage_name: str, process_id: Optional[str] = None) -> Any:
-        return self._memory_container.retrieve_stage_data(stage_name, process_id)
+        """
+        Retrieve data from the database.
+        
+        Args:
+            stage_name: Name of the stage
+            process_id: Optional process identifier (defaults to 'default')
+            
+        Returns:
+            The stored data or None if not found
+            
+        Raises:
+            KeyError: If no data is found for the stage and process
+        """
+        try:
+            import pickle
+            
+            process_id = process_id or 'default'
+            
+            # Query database for the latest record matching stage and process
+            query = self.session.query(self.IntermediateData)\
+                .filter_by(stage_name=stage_name, process_id=process_id)\
+                .order_by(self.IntermediateData.timestamp.desc())
+            
+            record = query.first()
+            
+            if not record:
+                raise KeyError(f"No data found for stage '{stage_name}' in process '{process_id}'")
+            
+            # Deserialize data
+            data = pickle.loads(record.data)
+            
+            self.logger.info(f"Retrieved data for stage '{stage_name}' with key: {record.storage_key}")
+            return data
+            
+        except Exception as e:
+            self.logger.error(f"Error retrieving data from database: {str(e)}")
+            if isinstance(e, KeyError):
+                raise  # Re-raise KeyError for consistent behavior
+            # For other errors, return None
+            return None
         
     def list_available_data(self, filters: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
-        return self._memory_container.list_available_data(filters)
+        """
+        List available data in the database.
+        
+        Args:
+            filters: Optional filters for data selection (stage_name, process_id, etc.)
+            
+        Returns:
+            List of dictionaries with data summaries
+        """
+        try:
+            import json
+            
+            filters = filters or {}
+            
+            # Start with base query
+            query = self.session.query(self.IntermediateData)
+            
+            # Apply filters if provided
+            if 'stage_name' in filters:
+                query = query.filter_by(stage_name=filters['stage_name'])
+            if 'process_id' in filters:
+                query = query.filter_by(process_id=filters['process_id'])
+            
+            # Execute query
+            records = query.all()
+            
+            # Format results
+            result = []
+            for record in records:
+                # Parse metadata
+                try:
+                    metadata = json.loads(record.metadata) if record.metadata else {}
+                except:
+                    metadata = {}
+                
+                # Create summary
+                summary = {
+                    'storage_key': record.storage_key,
+                    'process_id': record.process_id,
+                    'stage_name': record.stage_name,
+                    'timestamp': record.timestamp.isoformat() if record.timestamp else None,
+                    'metadata': metadata
+                }
+                
+                result.append(summary)
+            
+            return result
+            
+        except Exception as e:
+            self.logger.error(f"Error listing data from database: {str(e)}")
+            # Return empty list on error
+            return []
         
     def cleanup(self, policy: Optional[str] = None) -> None:
-        self._memory_container.cleanup(policy)
+        """
+        Clean up stored data based on policy.
+        
+        Args:
+            policy: Cleanup policy to apply ('keep_none', 'keep_latest', 'keep_all')
+        """
+        try:
+            policy = policy or self.config.get('cleanup_policy', 'keep_latest')
+            
+            if policy == 'keep_none':
+                # Delete all records
+                self.session.query(self.IntermediateData).delete()
+                self.session.commit()
+                self.logger.info("Cleaned up all stored data (policy: keep_none)")
+                
+            elif policy == 'keep_latest':
+                # For each stage_name and process_id combination, keep only the latest record
+                
+                # Get unique combinations of stage_name and process_id
+                combinations = self.session.query(
+                    self.IntermediateData.stage_name,
+                    self.IntermediateData.process_id
+                ).distinct().all()
+                
+                # For each combination, find the latest record ID
+                latest_ids = []
+                for stage_name, process_id in combinations:
+                    latest = self.session.query(self.IntermediateData.id)\
+                        .filter_by(stage_name=stage_name, process_id=process_id)\
+                        .order_by(self.IntermediateData.timestamp.desc())\
+                        .first()
+                    
+                    if latest:
+                        latest_ids.append(latest[0])
+                
+                # Delete all records except the latest ones
+                if latest_ids:
+                    deleted = self.session.query(self.IntermediateData)\
+                        .filter(~self.IntermediateData.id.in_(latest_ids))\
+                        .delete(synchronize_session=False)
+                    
+                    self.session.commit()
+                    self.logger.info(f"Cleaned up {deleted} records, keeping latest for each stage (policy: keep_latest)")
+            
+            elif policy != 'keep_all':
+                self.logger.warning(f"Unknown cleanup policy: {policy}, no cleanup performed")
+            
+        except Exception as e:
+            self.session.rollback()
+            self.logger.error(f"Error during cleanup: {str(e)}")
     
     def get_data_summary(self, storage_key: str) -> Dict[str, Any]:
-        return self._memory_container.get_data_summary(storage_key)
+        """
+        Get summary information about stored data.
+        
+        Args:
+            storage_key: The storage identifier
+            
+        Returns:
+            Dictionary with summary information
+            
+        Raises:
+            KeyError: If the storage key is not found
+        """
+        try:
+            import json
+            
+            # Query for the record
+            record = self.session.query(self.IntermediateData)\
+                .filter_by(storage_key=storage_key)\
+                .first()
+            
+            if not record:
+                raise KeyError(f"No data found for storage key: {storage_key}")
+            
+            # Parse metadata
+            try:
+                metadata = json.loads(record.metadata) if record.metadata else {}
+            except:
+                metadata = {}
+            
+            # Create summary
+            summary = {
+                'storage_key': record.storage_key,
+                'process_id': record.process_id,
+                'stage_name': record.stage_name,
+                'timestamp': record.timestamp.isoformat() if record.timestamp else None,
+                'data_size': len(record.data) if record.data else 0,
+                'metadata': metadata
+            }
+            
+            return summary
+            
+        except Exception as e:
+            self.logger.error(f"Error getting data summary: {str(e)}")
+            if isinstance(e, KeyError):
+                raise  # Re-raise KeyError for consistent behavior
+            # For other errors, return an error message
+            return {'error': str(e)}
+        
+    def disconnect(self) -> None:
+        """
+        Close the database connection.
+        """
+        if hasattr(self, 'session') and self.session:
+            self.session.close()
+        
+        if hasattr(self, 'engine') and self.engine:
+            self.engine.dispose()
+            
+        self.logger.info("Database connection closed")
 
 
 class HybridDataContainer(BaseDataContainer):
