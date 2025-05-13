@@ -9,6 +9,7 @@ from typing import Dict, List, Any
 
 # Local stuff
 from base_data_project.config import CONFIG
+from base_data_project.storage.containers import BaseDataContainer
 
 project_name = '' # TODO: Define project name here, or create a global name in config file (need to be the same everywhere)
 
@@ -17,7 +18,7 @@ logger = logging.getLogger(project_name)
 class AllocationData:
     """Container for data used in the allocation process"""
     
-    def __init__(self):
+    def __init__(self, data_container: BaseDataContainer = None):
         """Initialize empty data container"""
         # New dataframes
         self.contract_types_table = None
@@ -49,39 +50,30 @@ class AllocationData:
         self.product_production_line_assignments_df = None
         self.demands_df = None
         self.product_production_agg_df = None
+
+        # Store reference to data container if provided
+        self.data_container = data_container
     
-    def load_from_data_manager(self, data_manager):
+    def load_from_data_manager(self, data_manager, process_id, stage_name: str = 'data_loading'):
         """Load all required data using the data manager"""
         try:
             logger.info("Loading data from data manager")
+            # TODO: thi should be in the config file 
+            entities_list = ['contract_types', 'demands', 'days_numbers', 'employees', 'employee_hours', 'employee_production_lines', 'employee_shift_assignments', 'groups', 'line_types', 'operating_types', 'products', 'production_lines', 'production_lines_stats', 'production_lines_operating_types', 'product_production_line_assignments', 'product_production_lines', 'sections', 'shifts', 'shift_types']
 
-            # TODO: new data tables (remove the previous)
-            self.contract_types_table = data_manager.load_data('contract_types')
-            self.demands_table = data_manager.load_data('demands')
-            self.days_number_table = data_manager.load_data('days_numbers')
-            self.employees_table = data_manager.load_data('employees')
-            self.employee_hours_table = data_manager.load_data('employee_hours')
-            self.employee_production_lines_table = data_manager.load_data('employee_production_lines')
-            self.employee_shift_assignments_table = data_manager.load_data('employee_shift_assignments')
-            self.groups_table = data_manager.load_data('groups')
-            self.line_types_table = data_manager.load_data('line_types')
-            self.operating_types_table = data_manager.load_data('operating_types')
-            self.products_table = data_manager.load_data('products')
-            self.production_lines_table = data_manager.load_data('production_lines')
-            self.production_lines_stats_table = data_manager.load_data('production_lines_stats')
-            self.production_line_operating_type_table = data_manager.load_data('production_lines_operating_types')
-            self.product_production_line_assignments_table = data_manager.load_data('product_production_line_assignments')
-            self.product_production_line_table = data_manager.load_data('product_production_lines')
-            self.sections_table = data_manager.load_data('sections')
-            self.shifts_table = data_manager.load_data('shifts')
-            self.shift_types_table = data_manager.load_data('shift_types')
-                
+            for entity in entities_list:
+                self.data_container.store_stage_data(
+                    stage_name=stage_name,
+                    data={entity+'_table': data_manager.load_data(entity)},
+                    metadata={'process_id': process_id}
+                )
+
             return True
         except Exception as e:
             logger.error(f"Error loading data from data manager: {str(e)}")
             return False
     
-    def validate(self):
+    def validate_data_loaging(self, process_id, stage_name: str = 'data_loading'):
         """Validate that the required data is present, conforming and valid"""
         missing_data = []
         empty_df = []
@@ -89,6 +81,9 @@ class AllocationData:
         
         # Get all attributes that end with '_table'
         table_attributes = [attr for attr in dir(self) if attr.endswith('_table')]
+        existing_dataframes = self.data_container.list_available_data(
+            filters={'stage_name': stage_name, 'process_id': process_id}
+        )
         
         # Check each attribute
         for attr in table_attributes:
