@@ -188,3 +188,106 @@ def decision_diff(decisions1: Dict[int, Dict[str, Any]],
             diff[stage] = stage_diff
     
     return diff
+
+"""
+Utility functions for working with intermediate data storage.
+These can be added to base_data_project/utils.py
+"""
+
+def get_stored_stage_data(process_manager, stage_name: str, process_id: Optional[str] = None):
+    """
+    Retrieve stored data for a specific stage.
+    
+    Args:
+        process_manager: The process manager instance
+        stage_name: Name of the stage to retrieve data for
+        process_id: Optional process ID (defaults to current process)
+        
+    Returns:
+        The stored stage data or None if not found
+    """
+    if not hasattr(process_manager, 'stage_handler') or not process_manager.stage_handler:
+        process_manager.logger.warning("No stage handler available, cannot retrieve stored data")
+        return None
+        
+    stage_handler = process_manager.stage_handler
+    
+    if not hasattr(stage_handler, 'data_container') or not stage_handler.data_container:
+        process_manager.logger.warning("No data container available, cannot retrieve stored data")
+        return None
+    
+    # Use current process ID if not specified
+    if not process_id and hasattr(stage_handler, 'current_process_id'):
+        process_id = stage_handler.current_process_id
+    
+    try:
+        return stage_handler.data_container.retrieve_stage_data(stage_name, process_id)
+    except KeyError as e:
+        process_manager.logger.warning(f"No data found for stage {stage_name}: {str(e)}")
+        return None
+    except Exception as e:
+        process_manager.logger.error(f"Error retrieving stage data: {str(e)}")
+        return None
+
+def list_stored_data(process_manager, stage_name: Optional[str] = None, process_id: Optional[str] = None):
+    """
+    List available stored data.
+    
+    Args:
+        process_manager: The process manager instance
+        stage_name: Optional stage name to filter by
+        process_id: Optional process ID to filter by
+        
+    Returns:
+        List of available data summaries
+    """
+    if not hasattr(process_manager, 'stage_handler') or not process_manager.stage_handler:
+        process_manager.logger.warning("No stage handler available, cannot list stored data")
+        return []
+        
+    stage_handler = process_manager.stage_handler
+    
+    if not hasattr(stage_handler, 'data_container') or not stage_handler.data_container:
+        process_manager.logger.warning("No data container available, cannot list stored data")
+        return []
+    
+    # Build filters
+    filters = {}
+    if stage_name:
+        filters['stage_name'] = stage_name
+    if process_id:
+        filters['process_id'] = process_id
+    
+    try:
+        return stage_handler.data_container.list_available_data(filters)
+    except Exception as e:
+        process_manager.logger.error(f"Error listing stored data: {str(e)}")
+        return []
+
+def cleanup_stored_data(process_manager, policy: Optional[str] = None):
+    """
+    Clean up stored data based on policy.
+    
+    Args:
+        process_manager: The process manager instance
+        policy: Cleanup policy to apply ('keep_none', 'keep_latest', 'keep_all')
+        
+    Returns:
+        True if cleanup was successful, False otherwise
+    """
+    if not hasattr(process_manager, 'stage_handler') or not process_manager.stage_handler:
+        process_manager.logger.warning("No stage handler available, cannot clean up stored data")
+        return False
+        
+    stage_handler = process_manager.stage_handler
+    
+    if not hasattr(stage_handler, 'data_container') or not stage_handler.data_container:
+        process_manager.logger.warning("No data container available, cannot clean up stored data")
+        return False
+    
+    try:
+        stage_handler.data_container.cleanup(policy)
+        return True
+    except Exception as e:
+        process_manager.logger.error(f"Error cleaning up stored data: {str(e)}")
+        return False

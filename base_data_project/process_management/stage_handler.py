@@ -12,6 +12,7 @@ from base_data_project.process_management.exceptions import (
     InvalidStageSequenceError,
     DependencyError
 )
+from base_data_project.storage.factory import DataContainerFactory
 
 class ProcessStageHandler:
     """
@@ -40,6 +41,28 @@ class ProcessStageHandler:
         
         # Get logger
         self.logger = logging.getLogger(project_name)
+
+        # Initialize data container based on configuration
+        storage_strategy = config.get('storage_strategy', {'mode': 'memory'})
+        
+        if storage_strategy.get('mode') == 'memory':
+            from base_data_project.storage.containers import MemoryDataContainer
+            self.data_container = MemoryDataContainer(storage_strategy)
+        elif storage_strategy.get('mode') == 'persist':
+            # We'll implement these later
+            if storage_strategy.get('persist_format') == 'csv':
+                from base_data_project.storage.containers import CSVDataContainer
+                self.data_container = CSVDataContainer(storage_strategy)
+            else:
+                from base_data_project.storage.containers import DBDataContainer
+                self.data_container = DBDataContainer(storage_strategy)
+        elif storage_strategy.get('mode') == 'hybrid':
+            from base_data_project.storage.containers import HybridDataContainer
+            self.data_container = HybridDataContainer(storage_strategy)
+        else:
+            # Default to memory
+            from base_data_project.storage.containers import MemoryDataContainer
+            self.data_container = MemoryDataContainer(storage_strategy)
         
     def initialize_process(self, name: str, description: str) -> str:
         """
@@ -302,6 +325,25 @@ class ProcessStageHandler:
             except Exception as e:
                 # Log but don't fail if tracking fails
                 self.logger.warning(f"Error tracking stage completion: {str(e)}")
+            
+        if success and result_data and hasattr(self, 'data_container'):
+            try:
+                metadata = {
+                    'process_id': self.current_process_id,
+                    'timestamp': datetime.now().isoformat(),
+                    'stage_name': stage_name,
+                    'status': 'completed'
+                }
+                
+                self.data_container.store_stage_data(
+                    stage_name=stage_name,
+                    data=result_data,
+                    metadata=metadata
+                )
+                
+                self.logger.info(f"Stored intermediate data for stage {stage_name}")
+            except Exception as e:
+                self.logger.warning(f"Failed to store intermediate data: {str(e)}")
         
         return stage
     
