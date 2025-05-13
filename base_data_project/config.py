@@ -15,6 +15,15 @@ CONFIG = {
     'use_db': False,
     'db_url': f"sqlite:///{os.path.join(ROOT_DIR, 'data', 'production.db')}",
 
+    'storage_strategy': {
+        'mode': 'memory',  # Options: 'memory', 'persist', 'hybrid'
+        'persist_intermediate_results': False,
+        'stages_to_persist': [],  # Empty list means all stages
+        'cleanup_policy': 'keep_latest',  # Options: 'keep_all', 'keep_latest', 'keep_none'
+        'persist_format': 'csv',  # Options: 'csv', 'db'
+        'storage_dir': 'data/intermediate'  # For CSV storage
+    },
+
     'empty_dataframes': [],
     
     # Base directories
