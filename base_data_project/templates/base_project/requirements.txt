@@ -1,4 +1,4 @@
-base-data-project>=0.1.0
+base-data-project>=1.0.5
 pandas>=1.3.0
 sqlalchemy>=1.4.0
 click>=8.0.0
