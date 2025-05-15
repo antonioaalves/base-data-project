@@ -18,11 +18,13 @@ from datetime import datetime
 # Import project-specific components
 from src.config import PROJECT_NAME, CONFIG
 from base_data_project.data_manager.managers.base import BaseDataManager
+from base_data_project.storage.models import BaseDataModel
+from base_data_project.storage.containers import BaseDataContainer
 
 # Set up logger
 logger = logging.getLogger(PROJECT_NAME)
 
-class DataContainerDescansos:
+class DescansosDataModel(BaseDataModel):
     """
     Container for managing and transforming project data.
     
@@ -32,8 +34,11 @@ class DataContainerDescansos:
     - Tracking data lineage and operations
     """
     
-    def __init__(self):
+    def __init__(self, data_container: BaseDataContainer = None, project_name: str = 'R_allocation_project'):
         """Initialize an empty data container."""
+
+        # get the logic already implemented in base class
+        super().__init__(data_container, project_name)
 
         # Important auxiliary data
         self.messages_df = None

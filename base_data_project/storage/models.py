@@ -1,7 +1,15 @@
+""""""
+
+# Dependencies
 from sqlalchemy import create_engine, Column, Integer, String, LargeBinary, DateTime, Text
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
+from typing import Optional
 import datetime
+import logging
+
+# Local stuff
+from base_data_project.storage.containers import BaseDataContainer
 
 # Create base class for models
 Base = declarative_base()
@@ -23,3 +31,26 @@ class IntermediateData(Base):
     data_reference = Column(String(255))  # For reference to external storage
     metadata = Column(Text)  # JSON string of metadata
     size_bytes = Column(Integer)
+
+
+class BaseDataModel:
+    """
+    Base class for all data models in the framework.
+    Data models are responsible for domain-specific data operations and use a data container for intermediate storage.
+    """
+
+    def __init__(self, data_container: Optional[BaseDataContainer] = None, project_name: str = 'base_data_project'):
+        """
+        Initialize the data model with a data container.
+        
+        Args:
+            data_container: Storage container for intermediate results
+            project_name: Project name for logging        
+        """
+
+        # Storage container
+        self.data_container = data_container
+
+        # Get logger
+        self.logger = logging.getLogger(project_name)
+        self.logger.info(f"Initialized {self.__class__.__name__}")
