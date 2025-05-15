@@ -127,24 +127,48 @@ def validate_config(config: Dict[str, Any], required_keys: Dict[str, Any]) -> Tu
     errors = {}
     
     for key_path, expected_type in required_keys.items():
-        keys = key_path.split('.')
-        value = config
-        key_exists = True
-        
-        # Check if the key exists in the config
-        for key in keys:
-            if isinstance(value, dict) and key in value:
-                value = value[key]
-            else:
-                key_exists = False
+        if '.' not in key_path:
+            # Simple flat key
+            if key_path not in config:
                 errors[key_path] = f"Missing required key: {key_path}"
-                break
+            else:
+                value = config[key_path]
                 
-        # If the key exists, check its type
-        if key_exists:
-            if callable(expected_type) and not expected_type(value):
-                errors[key_path] = f"Invalid value for key {key_path}: {value}"
-            elif not callable(expected_type) and not isinstance(value, expected_type):
-                errors[key_path] = f"Expected {expected_type.__name__} for key {key_path}, got {type(value).__name__}"
+                # This is the critical fix:
+                # Check if it's a validator function or a type
+                if callable(expected_type) and not isinstance(expected_type, type):
+                    # It's a custom validator function
+                    if not expected_type(value):
+                        errors[key_path] = f"Invalid value for key {key_path}: {value}"
+                elif isinstance(expected_type, type) and not isinstance(value, expected_type):
+                    # It's a type - use isinstance for type checking
+                    errors[key_path] = f"Expected {expected_type.__name__} for key {key_path}, got {type(value).__name__}"
+        else:
+            # Nested key
+            parts = key_path.split('.')
+            current = config
+            found = True
+            
+            for i, part in enumerate(parts):
+                if not isinstance(current, dict) or part not in current:
+                    errors[key_path] = f"Missing required key: {key_path}"
+                    found = False
+                    break
                 
+                if i == len(parts) - 1:
+                    # Last part - validate the value
+                    value = current[part]
+                    
+                    # Same fix for type checking:
+                    if callable(expected_type) and not isinstance(expected_type, type):
+                        # It's a custom validator function
+                        if not expected_type(value):
+                            errors[key_path] = f"Invalid value for key {key_path}: {value}"
+                    elif isinstance(expected_type, type) and not isinstance(value, expected_type):
+                        # It's a type - use isinstance for type checking
+                        errors[key_path] = f"Expected {expected_type.__name__} for key {key_path}, got {type(value).__name__}"
+                else:
+                    # Not the last part - continue navigating
+                    current = current[part]
+    
     return len(errors) == 0, errors
