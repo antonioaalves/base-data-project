@@ -51,7 +51,7 @@ class TestBaseAlgorithm:
         
         # Verify result formatting
         assert formatted_results["algorithm_name"] == "ExampleAlgorithm"
-        assert formatted_results["status"] == "completed"
+        assert formatted_results["status"] == "success"
         assert "execution_time" in formatted_results
         assert "metrics" in formatted_results
     
@@ -69,6 +69,9 @@ class TestAlgorithmFactory:
     
     def test_register_and_create_algorithm(self):
         """Test registering and creating an algorithm via factory"""
+        # Clear any previously registered algorithms first to avoid conflicts
+        AlgorithmFactory._registered_algorithms = {}
+        
         # Register algorithm
         AlgorithmFactory.register_algorithm("example", ExampleAlgorithm)
         

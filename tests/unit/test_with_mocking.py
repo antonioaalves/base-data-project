@@ -12,21 +12,26 @@ class TestServiceWithMocking:
         # Configure mocks
         mock_data_manager.connect.return_value = None
         
+        # Create a properly configured mock process manager
+        mock_process_manager = Mock()
+        mock_process_manager.config = {"PROJECT_NAME": "test_project"}
+        
         # Create service with mocked components
         service = BaseService(
             data_manager=mock_data_manager,
-            process_manager=Mock()
+            process_manager=mock_process_manager
         )
         
         # Verify service was initialized correctly
         assert service.data_manager == mock_data_manager
-        
+
     @patch('base_data_project.process_management.stage_handler.ProcessStageHandler')
     @patch('base_data_project.data_manager.managers.base.BaseDataManager')
     def test_execute_stage(self, mock_data_manager, mock_stage_handler):
         """Test stage execution with mocked dependencies"""
-        # Create mocks
+        # Create properly configured mocks
         mock_process_manager = Mock()
+        mock_process_manager.config = {"PROJECT_NAME": "test_project"}
         mock_stage_handler.return_value = Mock()
         
         # Create service

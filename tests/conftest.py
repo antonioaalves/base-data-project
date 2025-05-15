@@ -3,26 +3,68 @@ import pytest
 import os
 import tempfile
 import pandas as pd
+import logging
 from typing import Dict, Any
+from pathlib import Path
+import sys
+from unittest.mock import patch, MagicMock
 
-@pytest.fixture(scope="session")
-def global_mock_config() -> Dict[str, Any]:
-    """Global configuration for all tests"""
+# Add project root to sys.path
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
+# Suppress logging during tests
+logging.basicConfig(level=logging.ERROR)
+
+# Fix for the internal pytest error with bestrelpath
+def pytest_configure(config):
+    import _pytest.pathlib
+    original_bestrelpath = _pytest.pathlib.bestrelpath
+    
+    def patched_bestrelpath(directory, path):
+        try:
+            return original_bestrelpath(directory, path)
+        except AssertionError:
+            return str(path)
+    
+    _pytest.pathlib.bestrelpath = patched_bestrelpath
+
+@pytest.fixture
+def mock_config():
+    """Basic configuration for testing"""
     return {
         'PROJECT_NAME': 'test_project',
-        'log_level': 'INFO'
+        'data_dir': 'test_data',
+        'output_dir': 'test_output',
+        'log_dir': 'test_logs',
+        'log_level': 'ERROR',
+        'use_db': False,
+        'dummy_data_filepaths': {
+            'test_entity': 'test_data/csvs/test_entity.csv'
+        }
     }
 
 @pytest.fixture
-def temp_data_dir():
+def temp_dir():
     """Create a temporary directory for test data"""
     with tempfile.TemporaryDirectory() as temp_dir:
-        # Create subdirectories
-        os.makedirs(os.path.join(temp_dir, "data", "csvs"), exist_ok=True)
-        os.makedirs(os.path.join(temp_dir, "output"), exist_ok=True)
-        os.makedirs(os.path.join(temp_dir, "logs"), exist_ok=True)
-        
         yield temp_dir
+
+@pytest.fixture
+def prepared_temp_dir(temp_dir):
+    """Create a temporary directory with standard project structure"""
+    os.makedirs(os.path.join(temp_dir, "data", "csvs"), exist_ok=True)
+    os.makedirs(os.path.join(temp_dir, "output"), exist_ok=True)
+    os.makedirs(os.path.join(temp_dir, "logs"), exist_ok=True)
+    return temp_dir
+
+@pytest.fixture
+def sample_dataframe():
+    """Create a sample DataFrame for testing"""
+    return pd.DataFrame({
+        'id': [1, 2, 3],
+        'name': ['A', 'B', 'C'],
+        'value': [10.5, 20.5, 30.5]
+    })
 
 @pytest.fixture
 def sample_dataframes():
@@ -45,13 +87,59 @@ def sample_dataframes():
     }
 
 @pytest.fixture
-def create_csv_files(temp_data_dir, sample_dataframes):
-    """Create CSV files from sample DataFrames"""
-    created_files = {}
+def mock_csv_data_manager(mock_config):
+    """Create a mocked CSVDataManager"""
+    from base_data_project.data_manager.managers.managers import CSVDataManager
     
-    for name, df in sample_dataframes.items():
-        file_path = os.path.join(temp_data_dir, "data", "csvs", f"{name}.csv")
-        df.to_csv(file_path, index=False)
-        created_files[name] = file_path
+    with patch('os.path.exists', return_value=True), \
+         patch('os.makedirs', return_value=None):
+        
+        manager = MagicMock(spec=CSVDataManager)
+        manager.config = mock_config
+        manager.connect.return_value = None
+        manager.disconnect.return_value = None
+        
+        # Set up the load_data and save_data methods with reasonable defaults
+        def mock_load_data(entity, **kwargs):
+            if entity == 'test_entity':
+                return pd.DataFrame({'id': [1, 2, 3], 'value': [10, 20, 30]})
+            return pd.DataFrame()
+            
+        def mock_save_data(entity, data, **kwargs):
+            return f"test_output/{entity}.csv"
+            
+        manager.load_data.side_effect = mock_load_data
+        manager.save_data.side_effect = mock_save_data
+        
+        return manager
+
+@pytest.fixture
+def mock_process_manager():
+    """Create a mocked ProcessManager"""
+    from base_data_project.process_management.manager import ProcessManager
     
-    return created_files
+    manager = MagicMock(spec=ProcessManager)
+    manager.current_decisions = {}
+    
+    # Set up behavior for make_decisions method
+    def mock_make_decisions(stage, decision_values, apply_defaults=True):
+        manager.current_decisions[stage] = decision_values
+        
+    manager.make_decisions.side_effect = mock_make_decisions
+    
+    return manager
+
+# Reset the AlgorithmFactory between tests
+@pytest.fixture(autouse=True)
+def reset_algorithm_factory():
+    """Reset the AlgorithmFactory between tests"""
+    from base_data_project.algorithms.factory import AlgorithmFactory
+    
+    # Store the original state
+    original_algorithms = AlgorithmFactory._registered_algorithms.copy()
+    
+    # Run the test
+    yield
+    
+    # Restore the original state
+    AlgorithmFactory._registered_algorithms = original_algorithms

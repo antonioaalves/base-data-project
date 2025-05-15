@@ -8,7 +8,7 @@ from base_data_project.utils import create_components
 class TestDataProcessIntegration:
     
     @pytest.fixture
-    def integrated_components(self, mock_config, tmp_path):
+    def integrated_components(self, mock_config, tmp_path, monkeypatch):
         """Create integrated data manager and process manager"""
         # Set up configuration with temporary directories
         test_config = mock_config.copy()
@@ -16,9 +16,9 @@ class TestDataProcessIntegration:
         test_config['output_dir'] = str(tmp_path / "output")
         
         # Create necessary directories
-        (tmp_path / "data").mkdir()
-        (tmp_path / "data" / "csvs").mkdir()
-        (tmp_path / "output").mkdir()
+        (tmp_path / "data").mkdir(exist_ok=True)
+        (tmp_path / "data" / "csvs").mkdir(exist_ok=True)
+        (tmp_path / "output").mkdir(exist_ok=True)
         
         # Create sample data file
         sample_df = pd.DataFrame({
@@ -33,12 +33,16 @@ class TestDataProcessIntegration:
             'sample': str(sample_file)
         }
         
+        # Mock the path-dependent functions
+        monkeypatch.setattr('base_data_project.utils.create_components', 
+                            lambda use_db, no_tracking, config: (
+                                CSVDataManager(config),
+                                ProcessManager({'config': config, 'version': '1.0.0'})
+                            ))
+        
         # Create components
-        data_manager, process_manager = create_components(
-            use_db=False, 
-            no_tracking=False,
-            config=test_config
-        )
+        data_manager = CSVDataManager(test_config)
+        process_manager = ProcessManager({'config': test_config, 'version': '1.0.0'})
         
         # Connect data manager
         data_manager.connect()

@@ -1,6 +1,7 @@
 # tests/unit/test_utils.py
 import pytest
 import os
+from pathlib import Path
 from base_data_project.utils import (
     create_components, 
     get_config_value, 
@@ -142,13 +143,23 @@ class TestPathHelpers:
     
     def test_get_project_root(self, monkeypatch):
         """Test project root detection with mocked paths"""
-        # Mock the cwd and path.exists functions
-        monkeypatch.setattr(os.path, 'exists', lambda path: 'main.py' in str(path))
-        monkeypatch.setattr('pathlib.Path.cwd', lambda: '/mock/project/dir')
+        # Create a mock path that will exist in the test environment
+        test_path = os.path.join(os.getcwd(), 'main.py')
+        
+        # Mock the path.exists function to return True for our test path
+        original_exists = os.path.exists
+        def mock_exists(path):
+            if str(path) == str(test_path):
+                return True
+            return original_exists(path)
+        
+        # Apply our mock
+        monkeypatch.setattr(os.path, 'exists', mock_exists)
+        monkeypatch.setattr('pathlib.Path.cwd', lambda: Path(os.getcwd()))
         
         # Test function
         root = get_project_root()
-        assert str(root) == '/mock/project/dir'
+        assert str(root) == os.getcwd()
     
     def test_get_data_path(self, monkeypatch, tmp_path):
         """Test data path construction"""
@@ -162,4 +173,5 @@ class TestPathHelpers:
         
         # Test with filename
         file_path = get_data_path('test.csv')
-        assert str(file_path).endswith('data/test.csv')
+        assert os.path.basename(file_path) == 'test.csv'
+        assert os.path.dirname(file_path).endswith('data')
