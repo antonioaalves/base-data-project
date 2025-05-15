@@ -852,7 +852,7 @@ def detect_outliers(data: pd.DataFrame, column: str, method: str = 'zscore',
         logger.error(f"Error detecting outliers: {str(e)}")
         return pd.Series([False] * len(data)), 0
 
-def generate_summary_report(data_container: DataContainerDescansos) -> Dict[str, Any]:
+def generate_summary_report(data_container: BaseDataContainer) -> Dict[str, Any]:
     """
     Generate a summary report of the data container.
     
