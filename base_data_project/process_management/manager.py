@@ -51,6 +51,10 @@ class ProcessManager:
         
         self.logger.info("Flexible ProcessManager initialized with core data")
 
+    @property
+    def config(self):
+        return self.core_data.get('config', {})
+
     def register_decision_point(self, stage: int, schema: Type, required: bool = True, 
                                defaults: Optional[Dict[str, Any]] = None) -> None:
         """
