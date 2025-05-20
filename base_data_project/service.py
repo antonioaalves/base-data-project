@@ -1,7 +1,7 @@
 """Base service class for process orchestration."""
 
 import logging
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, Tuple
 from datetime import datetime
 
 from base_data_project.data_manager.managers.base import BaseDataManager
@@ -192,3 +192,28 @@ class BaseService:
         if self.process_manager:
             return self.process_manager.get_stage_decision(stage, decision_name)
         return None
+    
+    def get_decisions_for_stage(self, stage_name: str) -> Dict[str, Any]:
+        """
+        Get all decisions for a specific stage by stage name.
+        
+        Args:
+            stage_name: Name of the stage to get decisions for
+            
+        Returns:
+            Dictionary of decisions or empty dict if not available
+        """
+        if not self.stage_handler or not self.process_manager:
+            return {}
+            
+        stage = self.stage_handler.stages.get(stage_name)
+        if not stage:
+            self.logger.warning(f"Stage '{stage_name}' not found in stage handler")
+            return {}
+            
+        stage_sequence = stage.get('sequence')
+        if stage_sequence is None:
+            self.logger.warning(f"No sequence found for stage '{stage_name}'")
+            return {}
+            
+        return self.process_manager.current_decisions.get(stage_sequence, {})
