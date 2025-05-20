@@ -722,20 +722,8 @@ class DBDataContainer(BaseDataContainer):
             # Create engine
             self.engine = create_engine(self.db_url)
             
-            # Create base class for models
-            Base = declarative_base()
-            
-            # Define the intermediate data table
-            class IntermediateData(Base):
-                __tablename__ = 'intermediate_data'
-                
-                id = Column(Integer, primary_key=True)
-                storage_key = Column(String(255), unique=True, index=True)
-                process_id = Column(String(255), index=True)
-                stage_name = Column(String(255), index=True)
-                timestamp = Column(DateTime, default=datetime.datetime.now)
-                data = Column(LargeBinary)  # Serialized data
-                metadata = Column(Text)  # JSON string of metadata
+            # Import base and intermediate_data models (very important for db creation)            
+            from base_data_project.storage.models import Base, IntermediateData
                 
             # Create tables
             Base.metadata.create_all(self.engine)
@@ -785,10 +773,15 @@ class DBDataContainer(BaseDataContainer):
             intermediate_data = self.IntermediateData(
                 storage_key=storage_key,
                 process_id=process_id,
+                scenario_id=0,
                 stage_name=stage_name,
                 timestamp=timestamp,
+                storage_type='',
+                data_format='',
                 data=data_pickle,
-                metadata=json.dumps(metadata)
+                data_reference='',
+                metadata_json=json.dumps(metadata),
+                size_bytes=0
             )
             
             # Save to database
@@ -1025,6 +1018,7 @@ class HybridDataContainer(BaseDataContainer):
         self.logger.warning("HybridDataContainer is not fully implemented yet. Falling back to memory storage.")
         
         # For now, just delegate to MemoryDataContainer
+        raise NotImplementedError("Hybrid approach not implemented yet")
         self._memory_container = MemoryDataContainer(config)
     
     def store_stage_data(self, stage_name: str, data: Any, metadata: Optional[Dict[str, Any]] = None) -> str:
