@@ -325,9 +325,15 @@ class ProcessStageHandler:
             except Exception as e:
                 # Log but don't fail if tracking fails
                 self.logger.warning(f"Error tracking stage completion: {str(e)}")
-            
+                
         if success and result_data and hasattr(self, 'data_container'):
             try:
+                import json
+                
+                # Determine if result data should be included in metadata or stored separately
+                # You can use size estimation or data type to make this decision
+                should_inline = self._should_inline_result_data(result_data)
+                
                 metadata = {
                     'process_id': self.current_process_id,
                     'timestamp': datetime.now().isoformat(),
@@ -335,17 +341,144 @@ class ProcessStageHandler:
                     'status': 'completed'
                 }
                 
-                self.data_container.store_stage_data(
-                    stage_name=stage_name,
-                    data=result_data,
-                    metadata=metadata
-                )
+                if should_inline:
+                    # Add the result data directly to metadata
+                    try:
+                        # Convert result data to JSON-serializable form
+                        json_data = self._convert_to_json_serializable(result_data)
+                        metadata['inlined_result_data'] = json_data
+                        metadata['storage_mode'] = 'inlined'
+                        
+                        # Store with empty or minimal actual data
+                        self.data_container.store_stage_data(
+                            stage_name=stage_name,
+                            data=None,  # No separate data storage needed
+                            metadata=metadata
+                        )
+                    except Exception as e:
+                        self.logger.warning(f"Failed to inline result data: {str(e)}")
+                        # Fall back to separate storage
+                        should_inline = False
                 
-                self.logger.info(f"Stored intermediate data for stage {stage_name}")
+                if not should_inline:
+                    # Store normally with separate data
+                    metadata['storage_mode'] = 'separate'
+                    self.data_container.store_stage_data(
+                        stage_name=stage_name,
+                        data=result_data,
+                        metadata=metadata
+                    )
+                
+                self.logger.info(f"Stored intermediate data for stage {stage_name} (mode: {metadata['storage_mode']})")
             except Exception as e:
                 self.logger.warning(f"Failed to store intermediate data: {str(e)}")
         
         return stage
+
+    def _should_inline_result_data(self, result_data: Dict[str, Any]) -> bool:
+        """
+        Determine if result data should be inlined in metadata.
+        
+        This makes decisions based on data size and complexity.
+        
+        Args:
+            result_data: The result data to evaluate
+            
+        Returns:
+            True if data should be inlined, False otherwise
+        """
+        import json
+        
+        # Check data complexity (nested structures)
+        def check_complexity(data, depth=0, max_depth=3):
+            if depth > max_depth:
+                return False
+            
+            if isinstance(data, dict):
+                return all(check_complexity(v, depth+1, max_depth) for v in data.values())
+            elif isinstance(data, list):
+                return len(data) <= 100 and all(check_complexity(item, depth+1, max_depth) for item in data)
+            return True
+        
+        # Try to estimate size by converting to JSON
+        try:
+            json_str = json.dumps(result_data)
+            size_bytes = len(json_str.encode('utf-8'))
+            
+            # Set a reasonable size threshold (e.g., 100KB)
+            size_threshold = self.config.get('inline_threshold_bytes', 100 * 1024)  # Default to 100KB
+            
+            return size_bytes <= size_threshold and check_complexity(result_data)
+        except (TypeError, OverflowError, ValueError):
+            # If it can't be converted to JSON easily, it's too complex
+            return False
+
+    def _convert_to_json_serializable(self, data):
+        """
+        Convert data to JSON-serializable form.
+        
+        Args:
+            data: The data to convert
+            
+        Returns:
+            JSON-serializable version of the data
+        """
+        import json
+        import pandas as pd
+        import numpy as np
+        from datetime import datetime, date
+        
+        class CustomJSONEncoder(json.JSONEncoder):
+            def default(self, obj):
+                if isinstance(obj, (datetime, date)):
+                    return obj.isoformat()
+                elif isinstance(obj, pd.DataFrame):
+                    return {
+                        "_type": "DataFrame",
+                        "data": obj.to_dict(orient='records'),
+                        "columns": obj.columns.tolist(),
+                        "index": obj.index.tolist() if not obj.index.equals(pd.RangeIndex(len(obj))) else None
+                    }
+                elif isinstance(obj, pd.Series):
+                    return {
+                        "_type": "Series",
+                        "data": obj.tolist(),
+                        "name": obj.name
+                    }
+                elif isinstance(obj, np.ndarray):
+                    return obj.tolist()
+                elif isinstance(obj, np.integer):
+                    return int(obj)
+                elif isinstance(obj, np.floating):
+                    return float(obj)
+                elif isinstance(obj, set):
+                    return list(obj)
+                return super().default(obj)
+        
+        # First, try to directly serialize with the custom encoder
+        try:
+            return json.loads(json.dumps(data, cls=CustomJSONEncoder))
+        except (TypeError, OverflowError):
+            # If that fails, try a more aggressive approach
+            if isinstance(data, dict):
+                result = {}
+                for k, v in data.items():
+                    try:
+                        result[k] = self._convert_to_json_serializable(v)
+                    except:
+                        result[k] = str(v)  # Fall back to string representation
+                return result
+            elif isinstance(data, list):
+                result = []
+                for item in data:
+                    try:
+                        result.append(self._convert_to_json_serializable(item))
+                    except:
+                        result.append(str(item))  # Fall back to string representation
+                return result
+            else:
+                # Fall back to string representation
+                return str(data)
     
     def start_substage(self, stage_name: str, substage_name: str) -> Dict[str, Any]:
         """

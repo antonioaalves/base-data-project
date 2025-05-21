@@ -175,9 +175,16 @@ class MemoryDataContainer(BaseDataContainer):
         matching_keys.sort(key=lambda x: x[1], reverse=True)
         latest_key = matching_keys[0][0]
         
-        # Return a deep copy to prevent modification of stored data
-        self.logger.info(f"Retrieved data for stage '{stage_name}' with key: {latest_key}")
-        return copy.deepcopy(self.data_store[latest_key])
+        metadata = self.metadata_store[latest_key]
+        
+        # Check if this is inlined data
+        if metadata.get('storage_mode') == 'inlined' and 'inlined_result_data' in metadata:
+            self.logger.info(f"Retrieved inlined data for stage '{stage_name}' with key: {latest_key}")
+            return metadata['inlined_result_data']
+        else:
+            # Return a deep copy to prevent modification of stored data
+            self.logger.info(f"Retrieved data for stage '{stage_name}' with key: {latest_key}")
+            return copy.deepcopy(self.data_store[latest_key])
         
     def list_available_data(self, filters: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
         """
@@ -404,18 +411,15 @@ class CSVDataContainer(BaseDataContainer):
     
     def store_stage_data(self, stage_name: str, data: Any, metadata: Optional[Dict[str, Any]] = None) -> str:
         """
-        Store data as CSV file.
+        Store data as CSV file or inline within metadata.
         
         Args:
             stage_name: Name of the stage
-            data: The data to store (must be DataFrame or dict of DataFrames)
+            data: The data to store (can be None if inlined in metadata)
             metadata: Additional context information
             
         Returns:
             Storage key (identifier) for the data
-            
-        Raises:
-            ValueError: If data is not a DataFrame or convertible to one
         """
         metadata = metadata or {}
         process_id = metadata.get('process_id', 'default')
@@ -429,11 +433,38 @@ class CSVDataContainer(BaseDataContainer):
         os.makedirs(process_dir, exist_ok=True)
         
         # File paths
-        data_path = os.path.join(process_dir, f"{storage_key}.csv")
         metadata_path = os.path.join(process_dir, f"{storage_key}_metadata.json")
         
+        # Check if this is inlined data
+        if metadata.get('storage_mode') == 'inlined':
+            # For inlined data, we only store the metadata
+            complete_metadata = {
+                'timestamp': timestamp.isoformat(),
+                'stage_name': stage_name,
+                'process_id': process_id,
+                'data_path': None,  # No separate data file
+                'file_type': 'inlined',
+                **metadata
+            }
+            
+            with open(metadata_path, 'w') as f:
+                json.dump(complete_metadata, f, indent=2)
+            
+            # Update metadata index
+            self.metadata_index[storage_key] = complete_metadata
+            self._save_metadata_index()
+            
+            self.logger.info(f"Stored inlined data for stage '{stage_name}' with key: {storage_key}")
+            return storage_key
+        
+        # Handle regular data storage if not inlined
+        data_path = os.path.join(process_dir, f"{storage_key}.csv")
+        
         # Store data based on type
-        if isinstance(data, pd.DataFrame):
+        if data is None:
+            # No actual data to store
+            file_type = 'none'
+        elif isinstance(data, pd.DataFrame):
             # Store DataFrame directly
             data.to_csv(data_path, index=True)
             file_type = 'dataframe'
@@ -451,7 +482,14 @@ class CSVDataContainer(BaseDataContainer):
                 pd.DataFrame(data).to_csv(data_path, index=True)
                 file_type = 'converted_to_dataframe'
             except Exception as e:
-                raise ValueError(f"Cannot store data as CSV: {str(e)}")
+                # If conversion fails, store as JSON
+                try:
+                    with open(data_path + '.json', 'w') as f:
+                        json.dump(data, f, cls=self._get_json_encoder())
+                    data_path = data_path + '.json'
+                    file_type = 'json'
+                except Exception as e2:
+                    raise ValueError(f"Cannot store data: {str(e2)}")
         
         # Store metadata
         complete_metadata = {
@@ -472,11 +510,10 @@ class CSVDataContainer(BaseDataContainer):
         
         self.logger.info(f"Stored data for stage '{stage_name}' with key: {storage_key}")
         return storage_key
-    
-    # Other methods to be implemented later (retrieve_stage_data, list_available_data, cleanup, get_data_summary)
+
     def retrieve_stage_data(self, stage_name: str, process_id: Optional[str] = None) -> Any:
         """
-        Retrieve data from CSV storage.
+        Retrieve data from CSV storage or inlined metadata.
         
         Args:
             stage_name: Name of the stage
@@ -506,13 +543,28 @@ class CSVDataContainer(BaseDataContainer):
         
         # Load data based on type
         metadata = self.metadata_index[latest_key]
-        data_path = metadata['data_path']
+        
+        # Check if this is inlined data
+        if metadata.get('file_type') == 'inlined' or metadata.get('storage_mode') == 'inlined':
+            if 'inlined_result_data' in metadata:
+                self.logger.info(f"Retrieved inlined data for stage '{stage_name}' with key: {latest_key}")
+                return metadata['inlined_result_data']
+            else:
+                self.logger.warning(f"Inlined data format indicated but no data found for key {latest_key}")
+                return metadata
+        
+        # Handle regular data retrieval
+        data_path = metadata.get('data_path')
         file_type = metadata.get('file_type', 'dataframe')
+        
+        if file_type == 'none' or not data_path or not os.path.exists(data_path):
+            # No data or path doesn't exist
+            self.logger.warning(f"No data file found for key {latest_key}, returning metadata only")
+            return metadata
         
         if file_type == 'dataframe':
             # Load single DataFrame
-            if os.path.exists(data_path):
-                return pd.read_csv(data_path, index_col=0)
+            return pd.read_csv(data_path, index_col=0)
         elif file_type == 'dataframe_dict':
             # Load dictionary of DataFrames
             if os.path.isdir(data_path):
@@ -523,10 +575,52 @@ class CSVDataContainer(BaseDataContainer):
                         df_path = os.path.join(data_path, file_name)
                         result[key] = pd.read_csv(df_path, index_col=0)
                 return result
+        elif file_type == 'json':
+            # Load JSON data
+            with open(data_path, 'r') as f:
+                return json.load(f)
         
         # Fall back to returning metadata if data couldn't be loaded
         self.logger.warning(f"Could not load data for key {latest_key}, returning metadata only")
         return metadata
+
+    def _get_json_encoder(self):
+        """
+        Get a custom JSON encoder that handles various data types.
+        """
+        import json
+        import pandas as pd
+        import numpy as np
+        from datetime import datetime, date
+        
+        class CustomJSONEncoder(json.JSONEncoder):
+            def default(self, obj):
+                if isinstance(obj, (datetime, date)):
+                    return obj.isoformat()
+                elif isinstance(obj, pd.DataFrame):
+                    return {
+                        "_type": "DataFrame",
+                        "data": obj.to_dict(orient='records'),
+                        "columns": obj.columns.tolist(),
+                        "index": obj.index.tolist() if not obj.index.equals(pd.RangeIndex(len(obj))) else None
+                    }
+                elif isinstance(obj, pd.Series):
+                    return {
+                        "_type": "Series",
+                        "data": obj.tolist(),
+                        "name": obj.name
+                    }
+                elif isinstance(obj, np.ndarray):
+                    return obj.tolist()
+                elif isinstance(obj, np.integer):
+                    return int(obj)
+                elif isinstance(obj, np.floating):
+                    return float(obj)
+                elif isinstance(obj, set):
+                    return list(obj)
+                return super().default(obj)
+        
+        return CustomJSONEncoder
         
     def list_available_data(self, filters: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
         """
@@ -743,11 +837,11 @@ class DBDataContainer(BaseDataContainer):
     
     def store_stage_data(self, stage_name: str, data: Any, metadata: Optional[Dict[str, Any]] = None) -> str:
         """
-        Store data in the database.
+        Store data in the database or inline within metadata.
         
         Args:
             stage_name: Name of the stage
-            data: The data to store
+            data: The data to store (can be None if inlined in metadata)
             metadata: Additional context information
             
         Returns:
@@ -766,22 +860,37 @@ class DBDataContainer(BaseDataContainer):
             # Generate a unique storage key
             storage_key = f"{process_id}_{stage_name}_{timestamp.strftime('%Y%m%d%H%M%S')}"
             
-            # Serialize data
-            data_pickle = pickle.dumps(data)
+            # Check if this is inlined data
+            if metadata.get('storage_mode') == 'inlined':
+                # For inlined data, we store null in the data field
+                intermediate_data = self.IntermediateData(
+                    storage_key=storage_key,
+                    process_id=process_id,
+                    stage_name=stage_name,
+                    timestamp=timestamp,
+                    data=None,  # No binary data
+                    metadata=json.dumps(metadata)
+                )
+                
+                # Save to database
+                self.session.add(intermediate_data)
+                self.session.commit()
+                
+                self.logger.info(f"Stored inlined data for stage '{stage_name}' with key: {storage_key}")
+                return storage_key
+            
+            # Regular data storage
+            # Serialize data if not None
+            data_pickle = pickle.dumps(data) if data is not None else None
             
             # Create database record
             intermediate_data = self.IntermediateData(
                 storage_key=storage_key,
                 process_id=process_id,
-                scenario_id=0,
                 stage_name=stage_name,
                 timestamp=timestamp,
-                storage_type='',
-                data_format='',
                 data=data_pickle,
-                data_reference='',
-                metadata_json=json.dumps(metadata),
-                size_bytes=0
+                metadata=json.dumps(metadata)
             )
             
             # Save to database
@@ -798,7 +907,7 @@ class DBDataContainer(BaseDataContainer):
         
     def retrieve_stage_data(self, stage_name: str, process_id: Optional[str] = None) -> Any:
         """
-        Retrieve data from the database.
+        Retrieve data from the database or inlined metadata.
         
         Args:
             stage_name: Name of the stage
@@ -812,6 +921,7 @@ class DBDataContainer(BaseDataContainer):
         """
         try:
             import pickle
+            import json
             
             process_id = process_id or 'default'
             
@@ -825,11 +935,30 @@ class DBDataContainer(BaseDataContainer):
             if not record:
                 raise KeyError(f"No data found for stage '{stage_name}' in process '{process_id}'")
             
-            # Deserialize data
-            data = pickle.loads(record.data)
+            # Parse metadata
+            try:
+                metadata = json.loads(record.metadata) if record.metadata else {}
+            except Exception as e:
+                self.logger.error(f"Error parsing metadata: {str(e)}")
+                metadata = {}
             
-            self.logger.info(f"Retrieved data for stage '{stage_name}' with key: {record.storage_key}")
-            return data
+            # Check if this is inlined data
+            if metadata.get('storage_mode') == 'inlined':
+                if 'inlined_result_data' in metadata:
+                    self.logger.info(f"Retrieved inlined data for stage '{stage_name}' with key: {record.storage_key}")
+                    return metadata['inlined_result_data']
+                else:
+                    self.logger.warning(f"Inlined data format indicated but no data found")
+                    return metadata
+            
+            # If not inlined, deserialize data from binary
+            if record.data:
+                data = pickle.loads(record.data)
+                self.logger.info(f"Retrieved data for stage '{stage_name}' with key: {record.storage_key}")
+                return data
+            else:
+                self.logger.warning(f"No binary data stored for key {record.storage_key}")
+                return metadata
             
         except Exception as e:
             self.logger.error(f"Error retrieving data from database: {str(e)}")
