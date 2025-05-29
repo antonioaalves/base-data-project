@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "base-data-project"
-version = "1.0.9"
+version = "1.0.10"
 description = "Standardized framework for data processing projects"
 readme = "README.md"
 authors = [{name = "António Alves", email = "antonio.alves@tlantic.com"}]

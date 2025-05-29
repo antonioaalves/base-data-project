@@ -216,4 +216,4 @@ class BaseService:
             self.logger.warning(f"No sequence found for stage '{stage_name}'")
             return {}
             
-        return self.process_manager.current_decisions.get(stage_sequence, {})
+        return stage_sequence, self.process_manager.current_decisions.get(stage_sequence, {})

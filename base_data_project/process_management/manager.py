@@ -32,13 +32,21 @@ class ProcessManager:
             core_data: The initial data for the process
             project_name: Optional project name for logging
         """
-        self.core_data = core_data            # Initial data for the process
-        self.current_decisions = {}           # Current set of decisions made by the user at each stage
-        self.computation_cache = {}           # Cache of computed results to avoid recalculation
-        self.saved_scenarios = []             # Saved scenarios for comparison
-        self.decision_points = {}             # Registered decision points
-        self.decision_schemas = {}            # Schemas for each decision point
-        self.default_values = {}              # Default values for each decision point
+        self.core_data = core_data            
+        self.current_decisions = {}           
+        self.computation_cache = {}           
+        self.saved_scenarios = []             
+        self.decision_points = {}             
+        self.decision_schemas = {}            
+        self.default_values = {}              
+        
+        # NEW: Extract and store config from core_data
+        if isinstance(core_data, dict) and 'config' in core_data:
+            self.config = core_data['config']
+            self.logger.info("Config extracted from core_data")
+        else:
+            self.config = {}
+            self.logger.warning("No config found in core_data, using empty config")
         
         # Get project name from core_data config if available, otherwise use provided or default
         if isinstance(core_data, dict) and 'config' in core_data and 'PROJECT_NAME' in core_data['config']:
@@ -50,6 +58,10 @@ class ProcessManager:
         self.logger = logging.getLogger(self.project_name)
         
         self.logger.info("Flexible ProcessManager initialized with core data")
+
+    @property
+    def config(self):
+        return self.core_data.get('config', {})
 
     def register_decision_point(self, stage: int, schema: Type, required: bool = True, 
                                defaults: Optional[Dict[str, Any]] = None) -> None:

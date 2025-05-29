@@ -118,7 +118,7 @@ git tag -a v1.0.0 -m "Version 1.0.0"
 git push origin main
 git push origin v1.0.0
 
-# Merge back to develop
+# Merge back to develop (CRITICAL STEP - DON'T SKIP!)
 git checkout develop
 git merge --no-ff release/1.0.0 -m "Merge release 1.0.0 back to develop"
 
@@ -163,6 +163,64 @@ git branch -d hotfix/critical-bug-fix
 git push origin --delete hotfix/critical-bug-fix
 ```
 
+## Branch Synchronization
+
+If branches get out of sync (e.g., releases weren't properly merged back):
+
+### Check branch status
+```bash
+# See how branches relate to each other
+git log --graph --oneline --all --decorate
+
+# Check how far behind/ahead branches are
+git checkout develop
+git status  # Will show "Your branch is X commits behind/ahead of origin/develop"
+```
+
+### Sync develop with main
+```bash
+git checkout develop
+git merge main  # Bring all release changes into develop
+git push origin develop
+```
+
+### Sync feature branches with develop
+```bash
+git checkout feature/my-feature
+git merge develop
+git push origin feature/my-feature
+```
+
+## Periodic Repository Maintenance
+
+Every few releases, or at least monthly:
+
+1. Ensure develop contains all changes from main:
+   ```bash
+   git checkout develop
+   git merge main
+   git push origin develop
+   ```
+
+2. Update all active feature branches with latest develop:
+   ```bash
+   git checkout feature/my-feature
+   git merge develop
+   git push origin feature/my-feature
+   ```
+
+3. Clean up old branches:
+   ```bash
+   # List merged branches
+   git branch --merged
+
+   # Delete local branches that have been merged
+   git branch -d branch-name
+
+   # Delete remote branches
+   git push origin --delete branch-name
+   ```
+
 ## GitHub Releases
 
 After pushing tags to GitHub, create proper GitHub releases:
@@ -175,6 +233,34 @@ After pushing tags to GitHub, create proper GitHub releases:
 6. Write release notes detailing changes, new features, bug fixes, etc.
 7. Optionally attach build artifacts (wheel files, etc.)
 8. Click "Publish release"
+
+## Troubleshooting
+
+### If branches are out of sync
+Follow the "Branch Synchronization" section above.
+
+### If you get merge conflicts
+1. Open the conflicted files (marked with `<<<<<<< HEAD`)
+2. Edit to resolve conflicts, removing conflict markers
+3. Save files
+4. `git add .` to mark as resolved
+5. `git commit` to complete the merge
+
+### If you accidentally committed to the wrong branch
+```bash
+# Save your changes
+git stash
+
+# Switch to correct branch
+git checkout correct-branch
+
+# Apply your changes here
+git stash apply
+
+# Commit to the correct branch
+git add .
+git commit -m "Your commit message"
+```
 
 ## Version Numbering Conventions
 
@@ -213,6 +299,7 @@ Install with: `pip install -e '.[dev]'`
 - See differences: `git diff branch1..branch2`
 - List tags: `git tag`
 - Push all tags: `git push --tags`
+- Create backup of a branch: `git branch branch-backup-name`
 
 ## Release Checklist
 
@@ -223,5 +310,5 @@ Install with: `pip install -e '.[dev]'`
 5. ✅ Merge to `main`
 6. ✅ Tag release
 7. ✅ Create GitHub release with notes
-8. ✅ Merge back to `develop`
+8. ✅ Merge back to `develop` (CRITICAL)
 9. ✅ Update `develop` version for next cycle
