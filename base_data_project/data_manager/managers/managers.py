@@ -71,6 +71,7 @@ class CSVDataManager(BaseDataManager):
         Args:
             entity: Entity type determining the file to load
             **kwargs: Additional parameters including:
+                - query_file: Path to SQL query file (maps to CSV via config)
                 - filepath: Optional explicit filepath
                 - separator: CSV separator (default ',')
                 - decimal: Decimal separator (default '.')
@@ -80,6 +81,13 @@ class CSVDataManager(BaseDataManager):
             DataFrame with loaded data
         """
         filepath = kwargs.get('filepath')
+
+        # NEW: Add query_file support
+        query_file = kwargs.get('query_file')
+        if query_file and not filepath:
+            # Map entity to CSV file using config
+            filepath = self.config.get('dummy_data_filepaths', {}).get(entity)
+            self.logger.info(f"Mapped query_file to CSV: {entity} -> {filepath}")
 
         if not filepath:
             # Try to get from filepath map
@@ -252,6 +260,7 @@ class DBDataManager(BaseDataManager):
         Args:
             entity: Entity type determining the table or model to query
             **kwargs: Additional parameters including:
+                - query_file: Path to SQL query file
                 - model_class: The SQLAlchemy model class
                 - query: Custom query to execute
                 - filters: Dictionary of filters to apply
@@ -276,6 +285,16 @@ class DBDataManager(BaseDataManager):
         custom_query = kwargs.get('query')
         filters = kwargs.get('filters', {})
         limit = kwargs.get('limit')
+        
+        # NEW: Add query_file support
+        query_file = kwargs.get('query_file')
+        if query_file and not custom_query:
+            with open(query_file, 'r', encoding='utf-8') as f:
+                custom_query = f.read().strip()
+            
+            # Format query with parameters if needed
+            custom_query = self._format_query(custom_query, **kwargs)
+            self.logger.info(f"Loaded query from file: {query_file}")
         
         try:
             self.logger.info(f"Loading database data for entity '{entity}'")
@@ -353,6 +372,28 @@ class DBDataManager(BaseDataManager):
             # Create an empty DataFrame with appropriate message
             data = pd.DataFrame()
             raise
+    
+    def _format_query(self, query: str, **kwargs) -> str:
+        """
+        Format query with parameters if needed.
+        
+        Args:
+            query: SQL query string
+            **kwargs: Parameters to substitute in query
+            
+        Returns:
+            Formatted query string
+        """
+        formatted_query = query
+        
+        # Replace common parameters
+        for param_name, param_value in kwargs.items():
+            placeholder = f"{{{param_name}}}"
+            if placeholder in formatted_query:
+                formatted_query = formatted_query.replace(placeholder, str(param_value))
+                self.logger.info(f"Replaced {placeholder} with {param_value}")
+        
+        return formatted_query
         
     def save_data(self, entity: str, data: pd.DataFrame, **kwargs) -> None:
         """
