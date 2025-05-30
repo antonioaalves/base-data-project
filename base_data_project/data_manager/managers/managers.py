@@ -6,6 +6,7 @@ import logging
 from typing import Dict, Any, List, Optional, Union
 from datetime import datetime
 import importlib
+from sqlalchemy import text
 
 # Import base data manager
 from base_data_project.data_manager.managers.base import BaseDataManager
@@ -289,28 +290,57 @@ class DBDataManager(BaseDataManager):
         # NEW: Add query_file support
         query_file = kwargs.get('query_file')
         if query_file and not custom_query:
-            with open(query_file, 'r', encoding='utf-8') as f:
-                custom_query = f.read().strip()
+            try: 
+                self.logger.info(f"Loading query from file: {query_file}")
+
+                # Check if the file exists
+                if not os.path.exists(query_file):
+                    self.logger.error(f"Query file not found: {query_file}")
+                    raise FileNotFoundError(f"Query file not found: {query_file}")
+                
+                with open(query_file, 'r', encoding='utf-8') as f:
+                    custom_query = f.read().strip()
+
+                if not custom_query:
+                    self.logger.error(f"Query file is empty: {query_file}")
+                    raise ValueError(f"Query file is empty: {query_file}")                
             
-            # Format query with parameters if needed
-            custom_query = self._format_query(custom_query, **kwargs)
-            self.logger.info(f"Loaded query from file: {query_file}")
+                # Format query with parameters if needed
+                custom_query = self._format_query(custom_query, **kwargs)
+                self.logger.info(f"Loaded query from file: {query_file}")
+                self.logger.debug(f"Query content: {custom_query[:200]}...")  # Log first 200 chars
+
+            except Exception as e:
+                self.logger.error(f"Error loading query file {query_file}: {str(e)}")
+                raise
         
         try:
             self.logger.info(f"Loading database data for entity '{entity}'")
             
             # Case 1: Custom query provided
             if custom_query is not None:
-                result = self.session.execute(custom_query)
-                data = pd.DataFrame(result.fetchall())
-                if result.keys():
-                    data.columns = result.keys()
-                
-                self.logger.info(f"Successfully loaded {len(data)} rows using custom query")
-                return data
+                self.logger.info("Executing custom query")
+                try: 
+                    result = self.session.execute(text(custom_query))
+                    rows = result.fetchall()
+
+                    if rows:
+                        # Get column names
+                        columns = list(result.keys()) 
+                        data = pd.DataFrame(rows, columns=columns)
+                    else:
+                        data = pd.DataFrame()
+                    
+                    self.logger.info(f"Successfully loaded {len(data)} rows using custom query")
+                    return data
+                except Exception as query_error:
+                    self.logger.error(f"Error executing query: {str(query_error)}")
+                    self.logger.debug(f"Failed query: {custom_query}")
+                    raise                    
                 
             # Case 2: Model class provided
             elif model_class is not None:
+                self.logger.info(f"Using model class: {model_class}")
                 query = self.session.query(model_class)
                 
                 # Apply filters if any
@@ -341,6 +371,7 @@ class DBDataManager(BaseDataManager):
                 
             # Case 3: Direct table query
             else:
+                self.logger.info(f"Querying table directly: {entity}")
                 metadata = MetaData()
                 table = Table(entity, metadata, autoload_with=self.engine)
                 query = self.session.query(table)
@@ -368,9 +399,11 @@ class DBDataManager(BaseDataManager):
                 return data
                 
         except Exception as e:
-            self.logger.error(f"Error loading database data: {str(e)}")
-            # Create an empty DataFrame with appropriate message
-            data = pd.DataFrame()
+            self.logger.error(f"Error loading database data for entity '{entity}': {str(e)}")
+            # Log additional context
+            self.logger.error(f"Query file: {query_file}")
+            self.logger.error(f"Custom query provided: {custom_query is not None}")
+            self.logger.error(f"Model class: {model_class}")
             raise
     
     def _format_query(self, query: str, **kwargs) -> str:
