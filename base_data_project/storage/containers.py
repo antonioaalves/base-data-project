@@ -1,5 +1,6 @@
 """Data container implementations for intermediate data storage."""
 
+# Dependencies
 import os
 import copy
 import json
@@ -9,6 +10,9 @@ from typing import Any, Dict, List, Optional, Union
 from datetime import datetime
 from pathlib import Path
 import uuid
+
+# Local stuff
+from base_data_project.log_config import get_logger
 
 class BaseDataContainer:
     """
@@ -29,7 +33,7 @@ class BaseDataContainer:
         
         # Get project name if available in config
         project_name = config.get('project_name', 'base_data_project')
-        self.logger = logging.getLogger(project_name)
+        self.logger = get_logger(project_name)
         
         self.logger.info(f"Initialized {self.__class__.__name__}")
         

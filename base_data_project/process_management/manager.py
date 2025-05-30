@@ -12,9 +12,7 @@ from typing import Dict, List, Any, Optional, Union, Type
 # Local stuff
 from base_data_project.process_management.exceptions import InvalidDataError
 from base_data_project.process_management.utils import generate_cache_key, validate_decision
-
-# Initialize logger with a default name - will be updated in __init__
-logger = logging.getLogger('base_data_project')
+from base_data_project.log_config import get_logger
 
 class ProcessManager:
     """
@@ -40,28 +38,31 @@ class ProcessManager:
         self.decision_schemas = {}            
         self.default_values = {}              
         
-        # NEW: Extract and store config from core_data
+    # Extract config first
         if isinstance(core_data, dict) and 'config' in core_data:
             self.config = core_data['config']
-            self.logger.info("Config extracted from core_data")
         else:
             self.config = {}
-            self.logger.warning("No config found in core_data, using empty config")
         
-        # Get project name from core_data config if available, otherwise use provided or default
+        # Get project name
         if isinstance(core_data, dict) and 'config' in core_data and 'PROJECT_NAME' in core_data['config']:
             self.project_name = core_data['config']['PROJECT_NAME']
         else:
             self.project_name = project_name or 'base_data_project'
         
-        # Get project-specific logger
-        self.logger = logging.getLogger(self.project_name)
+        # CREATE LOGGER BEFORE USING IT
+        self.logger = get_logger(self.project_name)
         
-        self.logger.info("Flexible ProcessManager initialized with core data")
+        # NOW you can use the logger
+        self.logger.info("ProcessManager initialized with core data")
 
     @property
     def config(self):
-        return self.core_data.get('config', {})
+        return getattr(self, '_config', {})
+
+    @config.setter
+    def config(self, value):
+        self._config = value
 
     def register_decision_point(self, stage: int, schema: Type, required: bool = True, 
                                defaults: Optional[Dict[str, Any]] = None) -> None:

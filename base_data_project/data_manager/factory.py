@@ -5,6 +5,7 @@ import importlib
 from typing import Dict, Any, Optional, Type
 
 from base_data_project.data_manager.managers.base import BaseDataManager
+from base_data_project.log_config import get_logger
 
 class DataManagerFactory:
     """
@@ -48,8 +49,9 @@ class DataManagerFactory:
         Raises:
             ValueError: If the data source type is unsupported
         """
-        logger = logging.getLogger(config.get('PROJECT_NAME', 'base_data_project') 
-                                if config else 'base_data_project')
+        # Use the framework logger
+        project_name = config.get('PROJECT_NAME', 'base_data_project') if config else 'base_data_project'
+        logger = get_logger(project_name)
         
         # Default empty configuration
         if config is None:

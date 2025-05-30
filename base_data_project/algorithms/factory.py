@@ -5,6 +5,7 @@ import importlib
 from typing import Dict, Any, Optional, List, Type, Union
 
 from base_data_project.algorithms.base import BaseAlgorithm
+from base_data_project.log_config import get_logger
 
 class AlgorithmFactory:
     """
@@ -50,8 +51,8 @@ class AlgorithmFactory:
         Raises:
             ValueError: If the algorithm is not registered
         """
-        logger = logging.getLogger(parameters.get('project_name', 'base_data_project') 
-                                if parameters else 'base_data_project')
+        project_name = parameters.get('project_name', 'base_data_project') if parameters else 'base_data_project'
+        logger = get_logger(project_name)
         
         # Normalize algorithm name
         algorithm_name_lower = algorithm_name.lower()

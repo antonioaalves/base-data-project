@@ -13,6 +13,7 @@ from base_data_project.process_management.exceptions import (
     DependencyError
 )
 from base_data_project.storage.factory import DataContainerFactory
+from base_data_project.log_config import get_logger
 
 class ProcessStageHandler:
     """
@@ -40,7 +41,7 @@ class ProcessStageHandler:
         project_name = config.get('PROJECT_NAME', 'base_data_project')
         
         # Get logger
-        self.logger = logging.getLogger(project_name)
+        self.logger = get_logger(project_name)
 
         # Initialize data container based on configuration
         storage_strategy = config.get('storage_strategy', {'mode': 'memory'})

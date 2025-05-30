@@ -8,6 +8,7 @@ from base_data_project.data_manager.managers.base import BaseDataManager
 from base_data_project.process_management.manager import ProcessManager
 from base_data_project.process_management.stage_handler import ProcessStageHandler
 from base_data_project.storage.models import BaseDataModel
+from base_data_project.log_config import get_logger
 
 class BaseService:
     """
@@ -51,7 +52,7 @@ class BaseService:
             self.data_model = data_model_class(self.data_container)
         
         # Get logger
-        self.logger = logging.getLogger(project_name)
+        self.logger = get_logger(project_name)
         self.logger.info(f"Initialized {self.__class__.__name__}")
 
     def initialize_process(self, name: str, description: str) -> str:
