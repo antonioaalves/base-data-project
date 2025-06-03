@@ -6,7 +6,6 @@ import logging
 from typing import Dict, Any, List, Optional, Union
 from datetime import datetime
 import importlib
-from sqlalchemy import text
 
 # Import base data manager
 from base_data_project.data_manager.managers.base import BaseDataManager
@@ -276,7 +275,7 @@ class DBDataManager(BaseDataManager):
             raise RuntimeError("No database session available")
         
         try:
-            from sqlalchemy import Table, MetaData
+            from sqlalchemy import Table, MetaData, text
         except ImportError:
             self.logger.error("SQLAlchemy is required for DBDataManager")
             raise ImportError("SQLAlchemy is required for DBDataManager")
@@ -322,11 +321,12 @@ class DBDataManager(BaseDataManager):
                 self.logger.info("Executing custom query")
                 try: 
                     result = self.session.execute(text(custom_query))
+                    
+                    # Get column names BEFORE consuming the result
+                    columns = list(result.keys())
                     rows = result.fetchall()
 
                     if rows:
-                        # Get column names
-                        columns = list(result.keys()) 
                         data = pd.DataFrame(rows, columns=columns)
                     else:
                         data = pd.DataFrame()
@@ -336,7 +336,7 @@ class DBDataManager(BaseDataManager):
                 except Exception as query_error:
                     self.logger.error(f"Error executing query: {str(query_error)}")
                     self.logger.debug(f"Failed query: {custom_query}")
-                    raise                    
+                    raise
                 
             # Case 2: Model class provided
             elif model_class is not None:
