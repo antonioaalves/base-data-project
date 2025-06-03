@@ -6,22 +6,46 @@ import logging
 from typing import Dict, Any, List, Optional, Union
 from datetime import datetime
 import importlib
+import re
 
 # Import base data manager
 from base_data_project.data_manager.managers.base import BaseDataManager
 
 class CSVDataManager(BaseDataManager):
     """
-    Data manager implementation for CSV data sources.
+    Unified CSV data manager that supports both SQL queries and pandas filtering.
     
-    Handles all operations related to reading from and writing to CSV files.
+    Automatically chooses the best approach:
+    - SQL execution via pandasql (when available and SQL queries provided)
+    - Pandas filtering (fallback when pandasql not available)
+    
+    Your code remains identical regardless of which approach is used.
     """
+    
+    def __init__(self, config: Dict[str, Any]) -> None:
+        """Initialize the unified CSV data manager."""
+        super().__init__(config)
+        
+        # Try to import pandasql for SQL query support
+        self.pandasql_available = False
+        self.sqldf = None
+        try:
+            from pandasql import sqldf
+            self.sqldf = sqldf
+            self.pandasql_available = True
+            self.logger.info("PandasSQL available - SQL queries will be executed directly")
+        except ImportError:
+            self.logger.info("PandasSQL not available - will use pandas filtering for queries")
+        
+        # Cache for loaded DataFrames (when using SQL queries)
+        self.dataframe_cache = {}
+        self.cache_loaded = False
     
     def connect(self) -> None:
         """
         'Connect' to CSV files - validates that the data directory exists.
         
-        CSV doesn't have a persistent connection, but we validate paths.
+        If pandasql is available, optionally pre-loads CSV files for SQL queries.
         """
         # Check if filepath_map is available in config
         filepath_map = self.config.get('filepath_map', {})
@@ -56,38 +80,212 @@ class CSVDataManager(BaseDataManager):
                 
         self.logger.info(f"Connected to CSV data source with {len(filepath_map)} file paths configured")
 
+    def _load_dataframes_for_sql(self) -> None:
+        """
+        Load all CSV files into DataFrame cache for SQL query execution.
+        
+        This is called on-demand when SQL queries are used.
+        """
+        if self.cache_loaded or not self.pandasql_available:
+            return
+            
+        self.logger.info("Loading CSV files into DataFrame cache for SQL queries")
+        
+        filepath_map = self.config.get('filepath_map', {})
+        if not filepath_map:
+            filepath_map = self.config.get('dummy_data_filepaths', {})
+        
+        for entity, filepath in filepath_map.items():
+            if os.path.exists(filepath):
+                try:
+                    df = pd.read_csv(filepath)
+                    self.dataframe_cache[entity] = df
+                    
+                    # Also create mappings for SQL table names
+                    # Handle patterns like 'wfm.esc_feriado' -> 'esc_feriado'
+                    table_name = entity
+                    if '.' in table_name:
+                        table_name = table_name.split('.')[-1]
+                    
+                    self.dataframe_cache[table_name] = df
+                    
+                    self.logger.info(f"Loaded {len(df)} rows from {filepath} as table '{table_name}'")
+                    
+                except Exception as e:
+                    self.logger.error(f"Error loading CSV {filepath}: {str(e)}")
+            else:
+                self.logger.warning(f"CSV file not found: {filepath}")
+        
+        # Auto-detect table names from SQL files
+        self._auto_detect_table_mappings()
+        self.cache_loaded = True
+
+    def _auto_detect_table_mappings(self) -> None:
+        """Auto-detect table names from SQL files and map them to entities."""
+        entities_config = self.config.get('available_entities_processing', {})
+        
+        for entity, query_file in entities_config.items():
+            if os.path.exists(query_file):
+                try:
+                    with open(query_file, 'r', encoding='utf-8') as f:
+                        sql_content = f.read()
+                    
+                    # Extract table names from FROM clauses
+                    from_matches = re.findall(r'from\s+(\w+\.?\w+)', sql_content, re.IGNORECASE)
+                    
+                    for table_ref in from_matches:
+                        if '.' in table_ref:
+                            schema, table = table_ref.split('.', 1)
+                            clean_table = table
+                        else:
+                            clean_table = table_ref
+                        
+                        # Map this table name to the entity if we have the DataFrame
+                        if entity in self.dataframe_cache:
+                            self.dataframe_cache[clean_table] = self.dataframe_cache[entity]
+                            self.logger.debug(f"Auto-mapped SQL table '{clean_table}' to entity '{entity}'")
+                
+                except Exception as e:
+                    self.logger.warning(f"Error parsing SQL file {query_file}: {str(e)}")
+
     def disconnect(self) -> None:
         """
-        No actual disconnection needed for CSV files.
-        
-        Included for interface consistency.
+        Disconnect and clear DataFrame cache if loaded.
         """
+        if hasattr(self, 'dataframe_cache'):
+            self.dataframe_cache.clear()
+            self.cache_loaded = False
         self.logger.info("Disconnected from CSV data source")
 
     def load_data(self, entity: str, **kwargs) -> pd.DataFrame:
         """
-        Load data from a CSV file.
+        Load data from a CSV file with support for both SQL queries and pandas filtering.
         
         Args:
             entity: Entity type determining the file to load
             **kwargs: Additional parameters including:
-                - query_file: Path to SQL query file (maps to CSV via config)
+                # SQL Query parameters (when pandasql is available)
+                - query_file: Path to SQL query file
+                - query: Direct SQL query string
+                
+                # File parameters
                 - filepath: Optional explicit filepath
                 - separator: CSV separator (default ',')
                 - decimal: Decimal separator (default '.')
                 - encoding: File encoding (default 'utf-8')
+                - header: Header row number (default 0)
+                - index_col: Column to use as index
+                - parse_dates: Parse date columns
+                
+                # Pandas filtering parameters (fallback when no SQL)
+                - filters: Dictionary of column filters {column: value}
+                - where_conditions: List of condition strings for complex filtering
+                - limit: Maximum number of rows to return
+                - offset: Number of rows to skip (for pagination)
+                - sort_by: Column name(s) to sort by
+                - sort_ascending: Sort direction (default True)
+                - columns: List of specific columns to return
+                
+                # Any other parameters will be used for SQL parameter substitution
                 
         Returns:
             DataFrame with loaded data
         """
+        query_file = kwargs.get('query_file')
+        direct_query = kwargs.get('query')
+        
+        # If we have a SQL query and pandasql is available, use SQL execution
+        if (query_file or direct_query) and self.pandasql_available:
+            return self._load_data_with_sql(entity, **kwargs)
+        else:
+            # Fall back to pandas filtering approach
+            if query_file or direct_query:
+                self.logger.info("SQL query provided but pandasql not available, using pandas filtering")
+            return self._load_data_with_pandas(entity, **kwargs)
+
+    def _load_data_with_sql(self, entity: str, **kwargs) -> pd.DataFrame:
+        """
+        Load data using SQL queries against cached DataFrames.
+        
+        Args:
+            entity: Entity name
+            **kwargs: Parameters including query_file, query, and SQL parameters
+            
+        Returns:
+            DataFrame with query results
+        """
+        # Ensure DataFrames are loaded into cache
+        self._load_dataframes_for_sql()
+        
+        query_file = kwargs.get('query_file')
+        direct_query = kwargs.get('query')
+        
+        if query_file and os.path.exists(query_file):
+            # Read SQL from file
+            with open(query_file, 'r', encoding='utf-8') as f:
+                sql_query = f.read().strip()
+            self.logger.info(f"Loaded SQL query from {query_file}")
+        elif direct_query:
+            # Use direct query
+            sql_query = direct_query
+            self.logger.info("Using direct SQL query")
+        else:
+            # No query provided, return the entire DataFrame for the entity
+            if entity in self.dataframe_cache:
+                self.logger.info(f"Returning entire DataFrame for entity '{entity}'")
+                return self.dataframe_cache[entity].copy()
+            else:
+                self.logger.warning(f"No data found for entity '{entity}'")
+                return pd.DataFrame()
+        
+        # Format SQL query with parameters
+        formatted_query = self._format_sql_query(sql_query, **kwargs)
+        
+        try:
+            self.logger.info(f"Executing SQL query for entity '{entity}'")
+            self.logger.debug(f"SQL Query: {formatted_query}")
+            
+            # Execute SQL query using pandasql
+            result = self.sqldf(formatted_query, self.dataframe_cache)
+            
+            self.logger.info(f"SQL query returned {len(result)} rows")
+            return result
+            
+        except Exception as e:
+            self.logger.error(f"Error executing SQL query: {str(e)}")
+            self.logger.error(f"Query: {formatted_query}")
+            self.logger.error(f"Available tables: {list(self.dataframe_cache.keys())}")
+            raise
+
+    def _load_data_with_pandas(self, entity: str, **kwargs) -> pd.DataFrame:
+        """
+        Load data using pandas filtering (original implementation).
+        
+        This is the fallback when pandasql is not available or no SQL query is provided.
+        """
         filepath = kwargs.get('filepath')
 
-        # NEW: Add query_file support
+        # Handle query_file mapping and automatic SQL-to-CSV translation
         query_file = kwargs.get('query_file')
         if query_file and not filepath:
             # Map entity to CSV file using config
             filepath = self.config.get('dummy_data_filepaths', {}).get(entity)
             self.logger.info(f"Mapped query_file to CSV: {entity} -> {filepath}")
+            
+            # Automatically translate SQL query to CSV filtering if query file exists
+            auto_filters, auto_conditions, auto_columns = self._parse_sql_query_for_csv(query_file, **kwargs)
+            
+            # Merge automatic filters with explicitly provided ones
+            if auto_filters:
+                existing_filters = kwargs.get('filters', {})
+                kwargs['filters'] = {**auto_filters, **existing_filters}
+            
+            if auto_conditions:
+                existing_conditions = kwargs.get('where_conditions', [])
+                kwargs['where_conditions'] = auto_conditions + existing_conditions
+                
+            if auto_columns and not kwargs.get('columns'):
+                kwargs['columns'] = auto_columns
 
         if not filepath:
             # Try to get from filepath map
@@ -110,6 +308,15 @@ class CSVDataManager(BaseDataManager):
         index_col = kwargs.get('index_col', None)
         parse_dates = kwargs.get('parse_dates', False)
         
+        # Get filtering parameters
+        filters = kwargs.get('filters', {})
+        where_conditions = kwargs.get('where_conditions', [])
+        limit = kwargs.get('limit')
+        offset = kwargs.get('offset', 0)
+        sort_by = kwargs.get('sort_by')
+        sort_ascending = kwargs.get('sort_ascending', True)
+        columns = kwargs.get('columns')
+        
         try:
             self.logger.info(f"Loading CSV data for entity {entity} from {filepath}")
             
@@ -130,6 +337,12 @@ class CSVDataManager(BaseDataManager):
             )
             
             self.logger.info(f"Successfully loaded {len(data)} rows for entity '{entity}'")
+            
+            # Apply filtering if specified
+            if filters or where_conditions or columns or sort_by or limit or offset:
+                data = self._apply_filters(data, filters, where_conditions, columns, 
+                                         sort_by, sort_ascending, limit, offset, **kwargs)
+            
             return data
             
         except pd.errors.EmptyDataError:
@@ -139,8 +352,333 @@ class CSVDataManager(BaseDataManager):
         except Exception as e:
             self.logger.error(f"Error loading CSV data: {str(e)}")
             raise
+
+    def _format_sql_query(self, query: str, **kwargs) -> str:
+        """
+        Format SQL query with parameter substitution.
         
-    def save_data(self, entity: str, data: pd.DataFrame, **kwargs) -> None:
+        Args:
+            query: SQL query string with parameter placeholders
+            **kwargs: Parameters for substitution
+            
+        Returns:
+            Formatted SQL query
+        """
+        formatted_query = query
+        
+        # Remove non-SQL parameters from kwargs
+        sql_params = {k: v for k, v in kwargs.items() 
+                     if k not in ['query_file', 'query', 'filepath', 'separator', 'encoding', 
+                                 'filters', 'where_conditions', 'limit', 'offset', 'sort_by', 
+                                 'sort_ascending', 'columns', 'header', 'index_col', 'parse_dates']}
+        
+        # Replace parameters in the query
+        for param_name, param_value in sql_params.items():
+            placeholder = f"{{{param_name}}}"
+            
+            if placeholder in formatted_query:
+                # Handle different data types
+                if isinstance(param_value, str):
+                    # For string values, add quotes
+                    replacement = f"'{param_value}'"
+                else:
+                    # For numeric values, use as-is
+                    replacement = str(param_value)
+                
+                formatted_query = formatted_query.replace(placeholder, replacement)
+                self.logger.debug(f"Replaced {placeholder} with {replacement}")
+        
+        return formatted_query
+
+    def _apply_filters(self, data: pd.DataFrame, filters: Dict[str, Any], 
+                      where_conditions: List[str], columns: Optional[List[str]],
+                      sort_by: Optional[Union[str, List[str]]], sort_ascending: bool,
+                      limit: Optional[int], offset: int, **kwargs) -> pd.DataFrame:
+        """
+        Apply filtering, sorting, and selection to the DataFrame.
+        
+        Args:
+            data: Input DataFrame
+            filters: Dictionary of simple column filters
+            where_conditions: List of complex condition strings
+            columns: Specific columns to select
+            sort_by: Column(s) to sort by
+            sort_ascending: Sort direction
+            limit: Maximum rows to return
+            offset: Rows to skip
+            **kwargs: Additional parameters for substitution in conditions
+            
+        Returns:
+            Filtered DataFrame
+        """
+        original_rows = len(data)
+        
+        # 1. Apply simple filters (exact matches)
+        if filters:
+            self.logger.info(f"Applying filters: {filters}")
+            for column, value in filters.items():
+                if column in data.columns:
+                    if isinstance(value, list):
+                        # Handle list of values (IN operation)
+                        data = data[data[column].isin(value)]
+                    else:
+                        # Handle single value (equals operation)
+                        data = data[data[column] == value]
+                else:
+                    self.logger.warning(f"Filter column '{column}' not found in data")
+        
+        # 2. Apply complex where conditions
+        if where_conditions:
+            self.logger.info(f"Applying where conditions: {where_conditions}")
+            for condition in where_conditions:
+                try:
+                    # Substitute parameters in condition
+                    formatted_condition = self._format_condition(condition, **kwargs)
+                    
+                    # Evaluate the condition
+                    mask = self._evaluate_condition(data, formatted_condition)
+                    data = data[mask]
+                    
+                except Exception as e:
+                    self.logger.error(f"Error applying condition '{condition}': {str(e)}")
+                    raise
+        
+        # 3. Select specific columns if specified
+        if columns:
+            self.logger.info(f"Selecting columns: {columns}")
+            # Only select columns that exist in the data
+            existing_columns = [col for col in columns if col in data.columns]
+            missing_columns = [col for col in columns if col not in data.columns]
+            
+            if missing_columns:
+                self.logger.warning(f"Columns not found in data: {missing_columns}")
+            
+            if existing_columns:
+                data = data[existing_columns]
+            else:
+                self.logger.warning("No valid columns found, returning empty DataFrame")
+                return pd.DataFrame()
+        
+        # 4. Apply sorting
+        if sort_by:
+            self.logger.info(f"Sorting by: {sort_by}, ascending: {sort_ascending}")
+            if isinstance(sort_by, str):
+                sort_by = [sort_by]
+            
+            # Only sort by columns that exist
+            existing_sort_columns = [col for col in sort_by if col in data.columns]
+            if existing_sort_columns:
+                data = data.sort_values(by=existing_sort_columns, ascending=sort_ascending)
+            else:
+                self.logger.warning(f"Sort columns not found: {sort_by}")
+        
+        # 5. Apply offset (skip rows)
+        if offset > 0:
+            self.logger.info(f"Applying offset: {offset}")
+            data = data.iloc[offset:]
+        
+        # 6. Apply limit
+        if limit is not None and limit > 0:
+            self.logger.info(f"Applying limit: {limit}")
+            data = data.head(limit)
+        
+        # Reset index after all operations
+        data = data.reset_index(drop=True)
+        
+        filtered_rows = len(data)
+        self.logger.info(f"Filtering complete: {original_rows} -> {filtered_rows} rows")
+        
+        return data
+
+    def _format_condition(self, condition: str, **kwargs) -> str:
+        """
+        Format condition string with parameter substitution.
+        
+        Args:
+            condition: Condition string with placeholders
+            **kwargs: Parameters for substitution
+            
+        Returns:
+            Formatted condition string
+        """
+        formatted_condition = condition
+        
+        # Replace parameters in the condition
+        for param_name, param_value in kwargs.items():
+            # Handle different placeholder formats
+            placeholders = [
+                f"{{{param_name}}}",  # {param_name}
+                f":{param_name}",     # :param_name
+                f"@{param_name}"      # @param_name
+            ]
+            
+            for placeholder in placeholders:
+                if placeholder in formatted_condition:
+                    # Handle different data types appropriately
+                    if isinstance(param_value, str):
+                        # Quote string values
+                        replacement = f"'{param_value}'"
+                    else:
+                        replacement = str(param_value)
+                    
+                    formatted_condition = formatted_condition.replace(placeholder, replacement)
+                    self.logger.debug(f"Replaced {placeholder} with {replacement}")
+        
+        return formatted_condition
+
+    def _evaluate_condition(self, data: pd.DataFrame, condition: str) -> pd.Series:
+        """
+        Evaluate a condition string against a DataFrame.
+        
+        Args:
+            data: DataFrame to evaluate against
+            condition: Condition string to evaluate
+            
+        Returns:
+            Boolean Series representing the condition result
+        """
+        # Create a safe evaluation environment with just the DataFrame columns
+        # and common functions
+        eval_env = {
+            # Add DataFrame columns to the environment
+            **{col: data[col] for col in data.columns},
+            
+            # Add common functions that might be useful
+            'abs': abs,
+            'len': len,
+            'str': str,
+            'int': int,
+            'float': float,
+            'min': min,
+            'max': max,
+            'sum': sum,
+            'any': any,
+            'all': all,
+            
+            # Add pandas functions
+            'isnull': pd.isnull,
+            'notnull': pd.notnull,
+            'isna': pd.isna,
+            'notna': pd.notna,
+        }
+        
+        try:
+            # Evaluate the condition
+            self.logger.debug(f"Evaluating condition: {condition}")
+            result = eval(condition, {"__builtins__": {}}, eval_env)
+            
+            # Ensure result is a boolean Series
+            if isinstance(result, pd.Series):
+                return result.astype(bool)
+            else:
+                # If result is a scalar, create a Series
+                return pd.Series([bool(result)] * len(data), index=data.index)
+                
+        except Exception as e:
+            self.logger.error(f"Error evaluating condition '{condition}': {str(e)}")
+            raise ValueError(f"Invalid condition: {condition}")
+
+    def _parse_sql_query_for_csv(self, query_file: str, **kwargs) -> tuple:
+        """
+        Parse SQL query file to automatically generate CSV filtering parameters.
+        
+        This method reads SQL query files and extracts:
+        1. Column selections (SELECT clause)
+        2. Filter conditions (WHERE clause) 
+        3. Parameter placeholders for substitution
+        
+        Args:
+            query_file: Path to SQL query file
+            **kwargs: Parameters for substitution in the query
+            
+        Returns:
+            Tuple of (filters_dict, conditions_list, columns_list)
+        """
+        if not os.path.exists(query_file):
+            self.logger.warning(f"Query file not found: {query_file}, skipping auto-translation")
+            return {}, [], None
+            
+        try:
+            self.logger.info(f"Parsing SQL query file for CSV translation: {query_file}")
+            
+            with open(query_file, 'r', encoding='utf-8') as f:
+                sql_content = f.read().strip().lower()
+            
+            # Remove comments and normalize whitespace
+            sql_content = re.sub(r'--.*?\n', '\n', sql_content)  # Remove line comments
+            sql_content = re.sub(r'/\*.*?\*/', '', sql_content, flags=re.DOTALL)  # Remove block comments
+            sql_content = ' '.join(sql_content.split())  # Normalize whitespace
+            
+            auto_filters = {}
+            auto_conditions = []
+            auto_columns = None
+            
+            # Extract SELECT columns
+            select_match = re.search(r'select\s+(.*?)\s+from', sql_content)
+            if select_match:
+                select_clause = select_match.group(1)
+                if select_clause.strip() != '*':
+                    # Parse column names (handle aliases and table prefixes)
+                    columns = []
+                    for col in select_clause.split(','):
+                        col = col.strip()
+                        # Remove table prefixes (e.g., "table.column" -> "column")
+                        if '.' in col:
+                            col = col.split('.')[-1]
+                        # Handle aliases (e.g., "column as alias" -> "column")
+                        if ' as ' in col:
+                            col = col.split(' as ')[0].strip()
+                        columns.append(col.strip())
+                    auto_columns = columns
+                    self.logger.info(f"Auto-detected columns: {auto_columns}")
+            
+            # Extract WHERE conditions
+            where_match = re.search(r'where\s+(.*?)(?:\s+order\s+by|\s+group\s+by|\s+limit|$)', sql_content)
+            if where_match:
+                where_clause = where_match.group(1).strip()
+                
+                # Split conditions by AND (simple parsing)
+                conditions = [cond.strip() for cond in where_clause.split(' and ')]
+                
+                for condition in conditions:
+                    # Try to parse simple equality conditions
+                    eq_match = re.match(r'(\w+(?:\.\w+)?)\s*=\s*\{(\w+)\}', condition)
+                    if eq_match:
+                        column = eq_match.group(1)
+                        param = eq_match.group(2)
+                        
+                        # Remove table prefix from column name
+                        if '.' in column:
+                            column = column.split('.')[-1]
+                        
+                        # Check if parameter is provided in kwargs
+                        if param in kwargs:
+                            auto_filters[column] = kwargs[param]
+                            self.logger.info(f"Auto-filter: {column} = {kwargs[param]} (from {param})")
+                        else:
+                            # Convert to where_condition for later substitution
+                            auto_conditions.append(f'{column} == {{{param}}}')
+                            self.logger.info(f"Auto-condition: {column} == {{{param}}}")
+                    else:
+                        # For complex conditions, convert parameter placeholders and add as-is
+                        converted_condition = condition
+                        
+                        # Convert SQL parameter format to our format
+                        converted_condition = re.sub(r'\{(\w+)\}', r'{\1}', converted_condition)
+                        
+                        # Remove table prefixes from column references
+                        converted_condition = re.sub(r'\b\w+\.(\w+)\b', r'\1', converted_condition)
+                        
+                        auto_conditions.append(converted_condition)
+                        self.logger.info(f"Auto-condition (complex): {converted_condition}")
+            
+            return auto_filters, auto_conditions, auto_columns
+            
+        except Exception as e:
+            self.logger.warning(f"Error parsing SQL query file {query_file}: {str(e)}")
+            return {}, [], None
+
+    def save_data(self, entity: str, data: pd.DataFrame, **kwargs) -> str:
         """
         Save data to a CSV file.
         
@@ -152,6 +690,9 @@ class CSVDataManager(BaseDataManager):
                 - separator: CSV separator (default ',')
                 - index: Whether to include index (default False)
                 - encoding: File encoding (default 'utf-8')
+        
+        Returns:
+            Path to the saved file
         """
         filepath = kwargs.get('filepath')
         
@@ -182,12 +723,50 @@ class CSVDataManager(BaseDataManager):
                 encoding=encoding
             )
             
+            # Update cache if this entity is cached
+            if hasattr(self, 'dataframe_cache') and entity in self.dataframe_cache:
+                self.dataframe_cache[entity] = data.copy()
+                self.logger.info(f"Updated cache for entity '{entity}'")
+            
             self.logger.info(f"Successfully saved data to {filepath}")
             return filepath
             
         except Exception as e:
             self.logger.error(f"Error saving CSV data: {str(e)}")
             raise
+
+    def execute_sql(self, sql_query: str, **kwargs) -> pd.DataFrame:
+        """
+        Execute a raw SQL query against cached DataFrames (when pandasql is available).
+        
+        Args:
+            sql_query: SQL query to execute
+            **kwargs: Parameters for query substitution
+            
+        Returns:
+            DataFrame with query results
+        """
+        if not self.pandasql_available:
+            raise RuntimeError("SQL execution requires pandasql. Install with: pip install pandasql")
+        
+        # Ensure DataFrames are loaded
+        self._load_dataframes_for_sql()
+        
+        formatted_query = self._format_sql_query(sql_query, **kwargs)
+        
+        try:
+            self.logger.info("Executing raw SQL query")
+            self.logger.debug(f"SQL: {formatted_query}")
+            
+            result = self.sqldf(formatted_query, self.dataframe_cache)
+            
+            self.logger.info(f"Raw SQL query returned {len(result)} rows")
+            return result
+            
+        except Exception as e:
+            self.logger.error(f"Error executing raw SQL: {str(e)}")
+            raise
+
 
 class DBDataManager(BaseDataManager):
     """
