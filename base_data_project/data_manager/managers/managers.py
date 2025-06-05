@@ -47,12 +47,8 @@ class CSVDataManager(BaseDataManager):
         
         If pandasql is available, optionally pre-loads CSV files for SQL queries.
         """
-        # Check if filepath_map is available in config
-        filepath_map = self.config.get('filepath_map', {})
-        
-        if not filepath_map:
-            # Try to get from dummy_data_filepaths if filepath_map is not found
-            filepath_map = self.config.get('dummy_data_filepaths', {})
+        # FIXED: Use only dummy_data_filepaths for CSV mappings
+        filepath_map = self.config.get('dummy_data_filepaths', {})
         
         # Get data directory path
         data_dir = self.config.get('data_dir', 'data')
@@ -68,7 +64,7 @@ class CSVDataManager(BaseDataManager):
             os.makedirs(output_dir, exist_ok=True)
             self.logger.info(f"Created output directory: {output_dir}")
         
-        # Verify that all the specified files exist if filepath_map is provided
+        # FIXED: Raise errors instead of warnings for missing files
         if filepath_map:
             missing_files = []
             for entity, path in filepath_map.items():
@@ -76,7 +72,9 @@ class CSVDataManager(BaseDataManager):
                     missing_files.append(f"{entity}: {path}")
             
             if missing_files:
-                self.logger.warning(f"The following data files do not exist: {', '.join(missing_files)}")
+                error_msg = f"The following configured CSV files do not exist: {', '.join(missing_files)}"
+                self.logger.error(error_msg)
+                raise FileNotFoundError(error_msg)
                 
         self.logger.info(f"Connected to CSV data source with {len(filepath_map)} file paths configured")
 
@@ -91,9 +89,8 @@ class CSVDataManager(BaseDataManager):
             
         self.logger.info("Loading CSV files into DataFrame cache for SQL queries")
         
-        filepath_map = self.config.get('filepath_map', {})
-        if not filepath_map:
-            filepath_map = self.config.get('dummy_data_filepaths', {})
+        # FIXED: Use only dummy_data_filepaths
+        filepath_map = self.config.get('dummy_data_filepaths', {})
         
         for entity, filepath in filepath_map.items():
             if os.path.exists(filepath):
@@ -113,8 +110,13 @@ class CSVDataManager(BaseDataManager):
                     
                 except Exception as e:
                     self.logger.error(f"Error loading CSV {filepath}: {str(e)}")
+                    # FIXED: Raise error instead of continuing silently
+                    raise
             else:
-                self.logger.warning(f"CSV file not found: {filepath}")
+                # FIXED: Raise error for missing files instead of warning
+                error_msg = f"CSV file not found during cache loading: {filepath}"
+                self.logger.error(error_msg)
+                raise FileNotFoundError(error_msg)
         
         # Auto-detect table names from SQL files
         self._auto_detect_table_mappings()
@@ -194,13 +196,14 @@ class CSVDataManager(BaseDataManager):
         query_file = kwargs.get('query_file')
         direct_query = kwargs.get('query')
         
-        # If we have a SQL query and pandasql is available, use SQL execution
+        # IMPROVED: Query file handling - execute SQL against DataFrames when available
         if (query_file or direct_query) and self.pandasql_available:
+            self.logger.info(f"Executing SQL query against DataFrames for entity '{entity}'")
             return self._load_data_with_sql(entity, **kwargs)
         else:
             # Fall back to pandas filtering approach
             if query_file or direct_query:
-                self.logger.info("SQL query provided but pandasql not available, using pandas filtering")
+                self.logger.info("SQL query provided but pandasql not available, using pandas filtering fallback")
             return self._load_data_with_pandas(entity, **kwargs)
 
     def _load_data_with_sql(self, entity: str, **kwargs) -> pd.DataFrame:
@@ -220,23 +223,45 @@ class CSVDataManager(BaseDataManager):
         query_file = kwargs.get('query_file')
         direct_query = kwargs.get('query')
         
-        if query_file and os.path.exists(query_file):
+        if query_file:
+            # FIXED: Proper error handling for query files
+            if not os.path.exists(query_file):
+                error_msg = f"SQL query file not found: {query_file}"
+                self.logger.error(error_msg)
+                raise FileNotFoundError(error_msg)
+                
             # Read SQL from file
             with open(query_file, 'r', encoding='utf-8') as f:
                 sql_query = f.read().strip()
+                
+            if not sql_query:
+                error_msg = f"SQL query file is empty: {query_file}"
+                self.logger.error(error_msg)
+                raise ValueError(error_msg)
+                
             self.logger.info(f"Loaded SQL query from {query_file}")
+            
+            # Extract table names from this specific SQL query and map them to the entity
+            self._map_sql_tables_to_entity(sql_query, entity)
+            
         elif direct_query:
             # Use direct query
             sql_query = direct_query
             self.logger.info("Using direct SQL query")
+            
+            # Extract table names from this specific SQL query and map them to the entity
+            self._map_sql_tables_to_entity(sql_query, entity)
+            
         else:
             # No query provided, return the entire DataFrame for the entity
             if entity in self.dataframe_cache:
                 self.logger.info(f"Returning entire DataFrame for entity '{entity}'")
                 return self.dataframe_cache[entity].copy()
             else:
-                self.logger.warning(f"No data found for entity '{entity}'")
-                return pd.DataFrame()
+                # FIXED: Raise error instead of returning empty DataFrame
+                error_msg = f"No data found for entity '{entity}' in DataFrame cache"
+                self.logger.error(error_msg)
+                raise ValueError(error_msg)
         
         # Format SQL query with parameters
         formatted_query = self._format_sql_query(sql_query, **kwargs)
@@ -255,7 +280,37 @@ class CSVDataManager(BaseDataManager):
             self.logger.error(f"Error executing SQL query: {str(e)}")
             self.logger.error(f"Query: {formatted_query}")
             self.logger.error(f"Available tables: {list(self.dataframe_cache.keys())}")
-            raise
+            # Fall back to CSV filtering approach
+            return self._load_data_with_pandas(entity, **kwargs)
+
+    def _map_sql_tables_to_entity(self, sql_query: str, entity: str) -> None:
+        """
+        Extract table names from a specific SQL query and map them to the entity DataFrame.
+        
+        This only processes the SQL query being executed, not all SQL files in config.
+        """
+        if entity not in self.dataframe_cache:
+            self.logger.warning(f"Entity '{entity}' not found in DataFrame cache")
+            return
+            
+        try:
+            # Extract table names from FROM clauses in this specific query
+            from_matches = re.findall(r'from\s+(\w+\.?\w+)', sql_query, re.IGNORECASE)
+            
+            for table_ref in from_matches:
+                if '.' in table_ref:
+                    schema, table = table_ref.split('.', 1)
+                    clean_table = table
+                else:
+                    clean_table = table_ref
+                
+                # Map this table name to the entity DataFrame
+                self.dataframe_cache[clean_table] = self.dataframe_cache[entity]
+                self.logger.debug(f"Mapped SQL table '{clean_table}' to entity '{entity}' for this query")
+        
+        except Exception as e:
+            self.logger.debug(f"Error mapping SQL tables for query: {str(e)}")
+            # This is not critical - the query might still work with entity names
 
     def _load_data_with_pandas(self, entity: str, **kwargs) -> pd.DataFrame:
         """
@@ -268,12 +323,15 @@ class CSVDataManager(BaseDataManager):
         # Handle query_file mapping and automatic SQL-to-CSV translation
         query_file = kwargs.get('query_file')
         if query_file and not filepath:
-            # Map entity to CSV file using config
+            # FIXED: Use only dummy_data_filepaths for CSV mappings
             filepath = self.config.get('dummy_data_filepaths', {}).get(entity)
-            self.logger.info(f"Mapped query_file to CSV: {entity} -> {filepath}")
+            
+            if filepath:
+                self.logger.info(f"Mapped entity '{entity}' to CSV file: {filepath}")
             
             # Automatically translate SQL query to CSV filtering if query file exists
-            auto_filters, auto_conditions, auto_columns = self._parse_sql_query_for_csv(query_file, **kwargs)
+            kwargs_without_query_file = {k: v for k, v in kwargs.items() if k != 'query_file'}
+            auto_filters, auto_conditions, auto_columns = self._parse_sql_query_for_csv(query_file, **kwargs_without_query_file)
             
             # Merge automatic filters with explicitly provided ones
             if auto_filters:
@@ -288,10 +346,8 @@ class CSVDataManager(BaseDataManager):
                 kwargs['columns'] = auto_columns
 
         if not filepath:
-            # Try to get from filepath map
-            filepath_map = self.config.get('filepath_map', {})
-            if not filepath_map:
-                filepath_map = self.config.get('dummy_data_filepaths', {})
+            # FIXED: Use only dummy_data_filepaths
+            filepath_map = self.config.get('dummy_data_filepaths', {})
                 
             if entity in filepath_map:
                 filepath = filepath_map[entity]
@@ -299,6 +355,13 @@ class CSVDataManager(BaseDataManager):
                 # Try to construct a default path
                 data_dir = self.config.get('data_dir', 'data')
                 filepath = os.path.join(data_dir, 'csvs', f"{entity}.csv")
+                self.logger.info(f"No explicit mapping for entity '{entity}', using default path: {filepath}")
+
+        # FIXED: Raise error instead of returning empty DataFrame
+        if not filepath:
+            error_msg = f"No filepath configured for entity '{entity}'"
+            self.logger.error(error_msg)
+            raise ValueError(error_msg)
 
         # Get CSV reading parameters
         separator = kwargs.get('separator', ',')
@@ -320,10 +383,11 @@ class CSVDataManager(BaseDataManager):
         try:
             self.logger.info(f"Loading CSV data for entity {entity} from {filepath}")
             
-            # Check if file exists
+            # FIXED: Raise error instead of returning empty DataFrame
             if not os.path.exists(filepath):
-                self.logger.warning(f"CSV file not found: {filepath}")
-                return pd.DataFrame()
+                error_msg = f"CSV file not found: {filepath}"
+                self.logger.error(error_msg)
+                raise FileNotFoundError(error_msg)
                 
             # Read CSV file
             data = pd.read_csv(
@@ -340,14 +404,20 @@ class CSVDataManager(BaseDataManager):
             
             # Apply filtering if specified
             if filters or where_conditions or columns or sort_by or limit or offset:
+                # Remove conflicting parameters from kwargs
+                filtered_kwargs = {k: v for k, v in kwargs.items() 
+                                if k not in ['filters', 'where_conditions', 'columns', 'sort_by', 
+                                            'sort_ascending', 'limit', 'offset']}
                 data = self._apply_filters(data, filters, where_conditions, columns, 
-                                         sort_by, sort_ascending, limit, offset, **kwargs)
+                                        sort_by, sort_ascending, limit, offset, **filtered_kwargs)
             
             return data
             
         except pd.errors.EmptyDataError:
-            self.logger.warning(f"Empty CSV file: {filepath}")
-            return pd.DataFrame()
+            # FIXED: Raise error instead of returning empty DataFrame
+            error_msg = f"Empty CSV file: {filepath}"
+            self.logger.error(error_msg)
+            raise ValueError(error_msg)
             
         except Exception as e:
             self.logger.error(f"Error loading CSV data: {str(e)}")
@@ -379,8 +449,10 @@ class CSVDataManager(BaseDataManager):
             if placeholder in formatted_query:
                 # Handle different data types
                 if isinstance(param_value, str):
-                    # For string values, add quotes
-                    replacement = f"'{param_value}'"
+                    # Remove leading/trailing quotes if present
+                    unquoted_value = param_value.strip("'\"")
+                    escaped_value = unquoted_value.replace("'", "''")
+                    replacement = f"'{escaped_value}'"
                 else:
                     # For numeric values, use as-is
                     replacement = str(param_value)
@@ -456,8 +528,10 @@ class CSVDataManager(BaseDataManager):
             if existing_columns:
                 data = data[existing_columns]
             else:
-                self.logger.warning("No valid columns found, returning empty DataFrame")
-                return pd.DataFrame()
+                # FIXED: Raise error instead of returning empty DataFrame
+                error_msg = "No valid columns found for selection"
+                self.logger.error(error_msg)
+                raise ValueError(error_msg)
         
         # 4. Apply sorting
         if sort_by:
@@ -516,8 +590,9 @@ class CSVDataManager(BaseDataManager):
                 if placeholder in formatted_condition:
                     # Handle different data types appropriately
                     if isinstance(param_value, str):
-                        # Quote string values
-                        replacement = f"'{param_value}'"
+                        # Quote string values and escape quotes
+                        escaped_value = param_value.replace("'", "''")
+                        replacement = f"'{escaped_value}'"
                     else:
                         replacement = str(param_value)
                     
@@ -565,7 +640,49 @@ class CSVDataManager(BaseDataManager):
         try:
             # Evaluate the condition
             self.logger.debug(f"Evaluating condition: {condition}")
-            result = eval(condition, {"__builtins__": {}}, eval_env)
+            
+            # Special handling for 'in' operations with single values
+            # Convert "column in (value)" to "column == value" for single values
+            import re
+            in_pattern = r'(\w+)\s+in\s+\(([^)]+)\)'
+            match = re.match(in_pattern, condition.strip())
+            
+            if match:
+                column_name = match.group(1)
+                values_str = match.group(2).strip()
+                
+                # Check if column exists
+                if column_name not in data.columns:
+                    raise ValueError(f"Column '{column_name}' not found in data")
+                
+                # Parse values - handle both single values and lists
+                if ',' in values_str:
+                    # Multiple values - create a list
+                    values = [v.strip().strip("'\"") for v in values_str.split(',')]
+                    # Convert to appropriate types
+                    try:
+                        # Try converting to numeric
+                        values = [float(v) if '.' in v else int(v) for v in values]
+                    except ValueError:
+                        # Keep as strings if conversion fails
+                        pass
+                    result = data[column_name].isin(values)
+                else:
+                    # Single value
+                    value = values_str.strip().strip("'\"")
+                    # Try converting to appropriate type
+                    try:
+                        if '.' in value:
+                            value = float(value)
+                        else:
+                            value = int(value)
+                    except ValueError:
+                        # Keep as string if conversion fails
+                        pass
+                    result = data[column_name] == value
+            else:
+                # For other conditions, use regular eval
+                result = eval(condition, {"__builtins__": {}}, eval_env)
             
             # Ensure result is a boolean Series
             if isinstance(result, pd.Series):
@@ -577,6 +694,7 @@ class CSVDataManager(BaseDataManager):
         except Exception as e:
             self.logger.error(f"Error evaluating condition '{condition}': {str(e)}")
             raise ValueError(f"Invalid condition: {condition}")
+    
 
     def _parse_sql_query_for_csv(self, query_file: str, **kwargs) -> tuple:
         """
@@ -594,15 +712,34 @@ class CSVDataManager(BaseDataManager):
         Returns:
             Tuple of (filters_dict, conditions_list, columns_list)
         """
-        if not os.path.exists(query_file):
-            self.logger.warning(f"Query file not found: {query_file}, skipping auto-translation")
+        # Skip empty or invalid file paths
+        if not query_file or not isinstance(query_file, str) or query_file.strip() == '':
+            self.logger.debug("Skipping empty query file path")
             return {}, [], None
+            
+        # Check if it's a directory path
+        if query_file.endswith(os.sep) or query_file.endswith('/'):
+            self.logger.warning(f"Query file path appears to be a directory: {query_file}")
+            return {}, [], None
+            
+        # FIXED: Raise error instead of returning empty results
+        if not os.path.exists(query_file) or not os.path.isfile(query_file):
+            error_msg = f"Query file not found: {query_file}"
+            self.logger.error(error_msg)
+            raise FileNotFoundError(error_msg)
             
         try:
             self.logger.info(f"Parsing SQL query file for CSV translation: {query_file}")
             
             with open(query_file, 'r', encoding='utf-8') as f:
-                sql_content = f.read().strip().lower()
+                sql_content = f.read().strip()
+                
+            if not sql_content:
+                error_msg = f"Query file is empty: {query_file}"
+                self.logger.error(error_msg)
+                raise ValueError(error_msg)
+                
+            sql_content = sql_content.lower()
             
             # Remove comments and normalize whitespace
             sql_content = re.sub(r'--.*?\n', '\n', sql_content)  # Remove line comments
@@ -675,8 +812,8 @@ class CSVDataManager(BaseDataManager):
             return auto_filters, auto_conditions, auto_columns
             
         except Exception as e:
-            self.logger.warning(f"Error parsing SQL query file {query_file}: {str(e)}")
-            return {}, [], None
+            self.logger.error(f"Error parsing SQL query file {query_file}: {str(e)}")
+            raise
 
     def save_data(self, entity: str, data: pd.DataFrame, **kwargs) -> str:
         """
@@ -747,7 +884,9 @@ class CSVDataManager(BaseDataManager):
             DataFrame with query results
         """
         if not self.pandasql_available:
-            raise RuntimeError("SQL execution requires pandasql. Install with: pip install pandasql")
+            error_msg = "SQL execution requires pandasql. Install with: pip install pandasql"
+            self.logger.error(error_msg)
+            raise ImportError(error_msg)
         
         # Ensure DataFrames are loaded
         self._load_dataframes_for_sql()
@@ -767,6 +906,60 @@ class CSVDataManager(BaseDataManager):
             self.logger.error(f"Error executing raw SQL: {str(e)}")
             raise
 
+    def clear_cache(self, entity: Optional[str] = None) -> None:
+        """
+        Clear cached DataFrames.
+        
+        Args:
+            entity: Optional specific entity to clear. If None, clears all cached DataFrames.
+        """
+        if entity:
+            if entity in self.dataframe_cache:
+                del self.dataframe_cache[entity]
+                self.logger.info(f"Cleared cached DataFrame for entity: {entity}")
+            else:
+                self.logger.warning(f"No cached DataFrame found for entity: {entity}")
+        else:
+            self.dataframe_cache.clear()
+            self.cache_loaded = False
+            self.logger.info("Cleared all cached DataFrames")
+
+    def get_cached_entities(self) -> List[str]:
+        """
+        Get list of currently cached entity names.
+        
+        Returns:
+            List of cached entity names
+        """
+        return list(self.dataframe_cache.keys())
+
+    def load_multiple_entities(self, entities: List[str], **kwargs) -> Dict[str, pd.DataFrame]:
+        """
+        Load multiple entities at once and cache them for potential SQL joins.
+        
+        Args:
+            entities: List of entity names to load
+            **kwargs: Parameters passed to load_data for each entity
+            
+        Returns:
+            Dictionary mapping entity names to their DataFrames
+        """
+        self.logger.info(f"Loading multiple entities: {entities}")
+        
+        results = {}
+        for entity in entities:
+            try:
+                results[entity] = self.load_data(entity, **kwargs)
+                self.logger.info(f"Successfully loaded entity: {entity}")
+            except Exception as e:
+                self.logger.error(f"Failed to load entity '{entity}': {str(e)}")
+                # Decide whether to continue or fail completely
+                if kwargs.get('fail_on_missing', True):
+                    raise
+                else:
+                    self.logger.warning(f"Skipping entity '{entity}' due to error")
+        
+        return results
 
 class DBDataManager(BaseDataManager):
     """
@@ -784,7 +977,7 @@ class DBDataManager(BaseDataManager):
         # Lazy import SQLAlchemy to avoid dependency if not used
         try:
             import sqlalchemy
-            from sqlalchemy import create_engine
+            from sqlalchemy import create_engine, text
             from sqlalchemy.orm import sessionmaker
         except ImportError:
             self.logger.error("SQLAlchemy is required for DBDataManager. Please install with: pip install sqlalchemy")
@@ -865,7 +1058,7 @@ class DBDataManager(BaseDataManager):
         filters = kwargs.get('filters', {})
         limit = kwargs.get('limit')
         
-        # NEW: Add query_file support
+        # Add query_file support
         query_file = kwargs.get('query_file')
         if query_file and not custom_query:
             try: 
@@ -899,6 +1092,7 @@ class DBDataManager(BaseDataManager):
             if custom_query is not None:
                 self.logger.info("Executing custom query")
                 try: 
+                    # FIXED: Wrap the query in text() for SQLAlchemy
                     result = self.session.execute(text(custom_query))
                     
                     # Get column names BEFORE consuming the result
@@ -1002,8 +1196,18 @@ class DBDataManager(BaseDataManager):
         for param_name, param_value in kwargs.items():
             placeholder = f"{{{param_name}}}"
             if placeholder in formatted_query:
-                formatted_query = formatted_query.replace(placeholder, str(param_value))
-                self.logger.info(f"Replaced {placeholder} with {param_value}")
+                # Handle different data types
+                if isinstance(param_value, str):
+                    # Remove leading/trailing quotes if present
+                    unquoted_value = param_value.strip("'\"")
+                    escaped_value = unquoted_value.replace("'", "''")
+                    replacement = f"'{escaped_value}'"
+                else:
+                    # For numeric values, use as-is
+                    replacement = str(param_value)
+                
+                formatted_query = formatted_query.replace(placeholder, replacement)
+                self.logger.info(f"Replaced {placeholder} with {replacement}")
         
         return formatted_query
         
@@ -1068,4 +1272,53 @@ class DBDataManager(BaseDataManager):
             if hasattr(self, 'session') and self.session:
                 self.session.rollback()
             self.logger.error(f"Error saving database data: {str(e)}")
+            raise
+
+    def execute_sql(self, sql_query: str, **kwargs) -> pd.DataFrame:
+        """
+        Execute a raw SQL query against the database.
+        
+        Args:
+            sql_query: SQL query to execute
+            **kwargs: Parameters for query substitution
+            
+        Returns:
+            DataFrame with query results
+        """
+        # Check if session exists
+        if not hasattr(self, 'session') or self.session is None:
+            self.logger.error("No database session available. Make sure to call connect() first.")
+            raise RuntimeError("No database session available")
+        
+        try:
+            from sqlalchemy import text
+        except ImportError:
+            self.logger.error("SQLAlchemy is required for DBDataManager")
+            raise ImportError("SQLAlchemy is required for DBDataManager")
+        
+        # Format query with parameters
+        formatted_query = self._format_query(sql_query, **kwargs)
+        
+        try:
+            self.logger.info("Executing raw SQL query")
+            self.logger.debug(f"SQL: {formatted_query}")
+            
+            # FIXED: Wrap the query in text() for SQLAlchemy
+            result = self.session.execute(text(formatted_query))
+            
+            # Get column names and rows
+            columns = list(result.keys())
+            rows = result.fetchall()
+            
+            if rows:
+                data = pd.DataFrame(rows, columns=columns)
+            else:
+                data = pd.DataFrame()
+            
+            self.logger.info(f"Raw SQL query returned {len(data)} rows")
+            return data
+            
+        except Exception as e:
+            self.logger.error(f"Error executing raw SQL: {str(e)}")
+            self.logger.debug(f"Failed query: {formatted_query}")
             raise
