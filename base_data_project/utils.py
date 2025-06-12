@@ -18,7 +18,7 @@ def create_components(use_db: bool = False,
         Tuple of (data_manager, process_manager)
     """
     # Get logger
-    logger = logging.getLogger(config.get('PROJECT_NAME', 'base_data_project') 
+    logger = logging.getLogger(config.get('project_name', 'base_data_project') 
                               if config else 'base_data_project')
     
     # Import factories

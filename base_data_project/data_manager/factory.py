@@ -50,7 +50,7 @@ class DataManagerFactory:
             ValueError: If the data source type is unsupported
         """
         # Use the framework logger
-        project_name = config.get('PROJECT_NAME', 'base_data_project') if config else 'base_data_project'
+        project_name = config.get('project_name', 'base_data_project') if config else 'base_data_project'
         logger = get_logger(project_name)
         
         # Default empty configuration

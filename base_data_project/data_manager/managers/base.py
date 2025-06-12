@@ -29,7 +29,7 @@ class BaseDataManager(ABC):
         self.config = config
         
         # Get project name from config or use default
-        project_name = config.get('PROJECT_NAME', 'base_data_project')
+        project_name = config.get('project_name', 'base_data_project')
         self.logger = get_logger(project_name)
         
         self.logger.info("Initialized BaseDataManager")

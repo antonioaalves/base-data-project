@@ -45,8 +45,8 @@ class ProcessManager:
             self.config = {}
         
         # Get project name
-        if isinstance(core_data, dict) and 'config' in core_data and 'PROJECT_NAME' in core_data['config']:
-            self.project_name = core_data['config']['PROJECT_NAME']
+        if isinstance(core_data, dict) and 'config' in core_data and 'project_name' in core_data['config']:
+            self.project_name = core_data['config']['project_name']
         else:
             self.project_name = project_name or 'base_data_project'
         

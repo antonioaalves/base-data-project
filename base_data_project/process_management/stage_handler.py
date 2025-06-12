@@ -38,7 +38,7 @@ class ProcessStageHandler:
         self.initialized = False
         
         # Get project name from config
-        project_name = config.get('PROJECT_NAME', 'base_data_project')
+        project_name = config.get('project_name', 'base_data_project')
         
         # Get logger
         self.logger = get_logger(project_name)
