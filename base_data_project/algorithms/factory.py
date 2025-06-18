@@ -5,6 +5,7 @@ import importlib
 from typing import Dict, Any, Optional, List, Type, Union
 
 from base_data_project.algorithms.base import BaseAlgorithm
+from base_data_project.log_config import get_logger
 
 class AlgorithmFactory:
     """
@@ -35,7 +36,8 @@ class AlgorithmFactory:
     def create_algorithm(cls, 
                        algorithm_name: str, 
                        data: Any = None,
-                       parameters: Optional[Dict[str, Any]] = None) -> BaseAlgorithm:
+                       parameters: Optional[Dict[str, Any]] = None,
+                       project_name: str = 'base_data_project') -> BaseAlgorithm:
         """
         Create and return an algorithm instance.
         
@@ -43,15 +45,15 @@ class AlgorithmFactory:
             algorithm_name: Name of the algorithm to create
             data: Optional data to pass to the algorithm
             parameters: Optional parameters for the algorithm
-            
+            project_name: Name of the project for logging
         Returns:
             Initialized algorithm instance
             
         Raises:
             ValueError: If the algorithm is not registered
         """
-        logger = logging.getLogger(parameters.get('project_name', 'base_data_project') 
-                                if parameters else 'base_data_project')
+        # Get logger
+        logger = get_logger(project_name)
         
         # Normalize algorithm name
         algorithm_name_lower = algorithm_name.lower()

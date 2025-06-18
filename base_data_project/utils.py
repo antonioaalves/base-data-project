@@ -3,9 +3,13 @@
 import logging
 from typing import Dict, Any, Tuple, Optional
 
+# Local stuff
+from base_data_project.log_config import get_logger
+
 def create_components(use_db: bool = False, 
                      no_tracking: bool = False, 
-                     config: Optional[Dict[str, Any]] = None) -> Tuple[Any, Any]:
+                     config: Optional[Dict[str, Any]] = None,
+                     project_name: str = 'base_data_project') -> Tuple[Any, Any]:
     """
     Create and configure system components based on arguments.
     
@@ -13,13 +17,14 @@ def create_components(use_db: bool = False,
         use_db: Whether to use database instead of CSV files
         no_tracking: Whether to disable process tracking
         config: Configuration dictionary
+        project_name: Name of the project for logging
         
     Returns:
         Tuple of (data_manager, process_manager)
     """
     # Get logger
-    logger = logging.getLogger(config.get('PROJECT_NAME', 'base_data_project') 
-                              if config else 'base_data_project')
+    print(f"Creating components for project: {project_name}")
+    logger = get_logger(project_name)
     
     # Import factories
     from base_data_project.data_manager.factory import DataManagerFactory
@@ -28,13 +33,17 @@ def create_components(use_db: bool = False,
     if config is None:
         config = {}
     
+    # Ensure project_name is in config
+    config['project_name'] = project_name
+    
     # Determine data source type
     data_source_type = 'db' if use_db or config.get('use_db', False) else 'csv'
 
     # Create data manager through factory
     data_manager = DataManagerFactory.create_data_manager(
         data_source_type=data_source_type,
-        config=config
+        config=config,
+        project_name=project_name
     )
 
     # Create process manager if tracking is enabled
@@ -51,7 +60,7 @@ def create_components(use_db: bool = False,
                 "data_source_type": data_source_type,
                 "use_db": use_db
             }
-            process_manager = ProcessManager(core_data)
+            process_manager = ProcessManager(core_data=core_data, project_name=project_name)
             
             # Log process manager creation
             logger.info("Process manager initialized.")

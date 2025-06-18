@@ -1,5 +1,6 @@
 """Data container implementations for intermediate data storage."""
 
+# Dependencies
 import os
 import copy
 import json
@@ -10,6 +11,9 @@ from datetime import datetime
 from pathlib import Path
 import uuid
 
+# Local stuff
+from base_data_project.log_config import get_logger
+
 class BaseDataContainer:
     """
     Abstract base class for intermediate data storage.
@@ -18,18 +22,16 @@ class BaseDataContainer:
     intermediate data from processing stages.
     """
     
-    def __init__(self, config: Dict[str, Any]):
+    def __init__(self, config: Dict[str, Any], project_name: str = 'base_data_project'):
         """
         Initialize the data container with configuration.
         
         Args:
             config: Configuration dictionary with storage settings
+            project_name: Name of the project for logging
         """
         self.config = config
-        
-        # Get project name if available in config
-        project_name = config.get('project_name', 'base_data_project')
-        self.logger = logging.getLogger(project_name)
+        self.logger = get_logger(project_name)
         
         self.logger.info(f"Initialized {self.__class__.__name__}")
         
@@ -99,14 +101,15 @@ class MemoryDataContainer(BaseDataContainer):
     Data container that stores intermediate data in memory.
     """
     
-    def __init__(self, config: Dict[str, Any]):
+    def __init__(self, config: Dict[str, Any], project_name: str = 'base_data_project'):
         """
         Initialize the memory data container.
         
         Args:
             config: Configuration dictionary with storage settings
         """
-        super().__init__(config)
+        super().__init__(config=config, project_name=project_name)
+        self.logger.info(f"Initialized {self.__class__.__name__} with project name: {project_name}")
         self.data_store = {}  # Stage data indexed by storage_key
         self.metadata_store = {}  # Metadata for each stored item
         
@@ -370,14 +373,14 @@ class CSVDataContainer(BaseDataContainer):
     Data container that stores intermediate data as CSV files.
     """
     
-    def __init__(self, config: Dict[str, Any]):
+    def __init__(self, config: Dict[str, Any], project_name: str = 'base_data_project'):
         """
         Initialize the CSV data container.
         
         Args:
             config: Configuration dictionary with storage settings
         """
-        super().__init__(config)
+        super().__init__(config=config, project_name=project_name)
         
         # Get storage directory from config
         self.storage_dir = config.get('storage_dir', 'data/intermediate')
@@ -781,14 +784,14 @@ class DBDataContainer(BaseDataContainer):
     Data container that stores intermediate data in a database.
     """
     
-    def __init__(self, config: Dict[str, Any]):
+    def __init__(self, config: Dict[str, Any], project_name: str = 'base_data_project'):
         """
         Initialize the database data container.
         
         Args:
             config: Configuration dictionary with storage settings
         """
-        super().__init__(config)
+        super().__init__(config=config, project_name=project_name)
         
         # Extract database configuration
         self.db_url = config.get('db_url')
@@ -1142,8 +1145,8 @@ class HybridDataContainer(BaseDataContainer):
     (Placeholder for future implementation)
     """
     
-    def __init__(self, config: Dict[str, Any]):
-        super().__init__(config)
+    def __init__(self, config: Dict[str, Any], project_name: str = 'base_data_project'):
+        super().__init__(config=config, project_name=project_name)
         self.logger.warning("HybridDataContainer is not fully implemented yet. Falling back to memory storage.")
         
         # For now, just delegate to MemoryDataContainer

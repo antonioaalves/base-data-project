@@ -1,10 +1,14 @@
 """Base data manager class to define the interface for all data managers."""
 
+# Dependencies
 import os
 import pandas as pd
 import logging
 from typing import Dict, Any, List, Optional, Union
 from abc import ABC, abstractmethod
+
+# Local stuff
+from base_data_project.log_config import get_logger
 
 class BaseDataManager(ABC):
     """
@@ -15,7 +19,7 @@ class BaseDataManager(ABC):
     and context management.
     """
 
-    def __init__(self, config: Dict[str, Any]) -> None:
+    def __init__(self, config: Dict[str, Any], project_name: str = 'base_data_project') -> None:
         """
         Initialize the data manager.
         
@@ -25,8 +29,7 @@ class BaseDataManager(ABC):
         self.config = config
         
         # Get project name from config or use default
-        project_name = config.get('PROJECT_NAME', 'base_data_project')
-        self.logger = logging.getLogger(project_name)
+        self.logger = get_logger(project_name)
         
         self.logger.info("Initialized BaseDataManager")
 

@@ -4,7 +4,10 @@ import logging
 import sys
 from datetime import datetime
 import os
-from typing import Optional
+from typing import Optional, Dict
+
+# Global logger registry
+_loggers: Dict[str, logging.Logger] = {}
 
 def setup_logger(project_name: str, 
                 log_level: int = logging.INFO, 
@@ -12,6 +15,7 @@ def setup_logger(project_name: str,
                 console_output: bool = True) -> logging.Logger:
     """
     Configure and return a logger instance with both file and console handlers.
+    If a logger with the given project_name already exists, return that instead.
     
     Args:
         project_name: Name of the project for the logger
@@ -22,6 +26,10 @@ def setup_logger(project_name: str,
     Returns:
         Configured logger instance
     """
+    # Check if logger already exists
+    if project_name in _loggers:
+        return _loggers[project_name]
+    
     # Use default log directory if not specified
     if log_dir is None:
         log_dir = 'logs'
@@ -29,10 +37,11 @@ def setup_logger(project_name: str,
     # Create logs directory if it doesn't exist
     if not os.path.exists(log_dir):
         os.makedirs(log_dir, exist_ok=True)
+
+    datetime_str = datetime.now().strftime('%Y%m%d_%H%M%S')
     
-    # Generate log filename with timestamp
-    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-    log_filename = os.path.join(log_dir, f'{project_name}_{timestamp}.log')
+    # Generate log filename WITH timestamp to reuse the same file
+    log_filename = os.path.join(log_dir, f'{project_name}_{datetime_str}.log')
     
     # Create logger
     logger = logging.getLogger(project_name)
@@ -63,6 +72,9 @@ def setup_logger(project_name: str,
         console_handler.setFormatter(console_formatter)
         logger.addHandler(console_handler)
     
+    # Store in registry
+    _loggers[project_name] = logger
+    
     logger.info(f'Logger initialized for {project_name}')
     return logger
 
@@ -76,13 +88,12 @@ def get_logger(project_name: str) -> logging.Logger:
     Returns:
         Logger instance
     """
-    logger = logging.getLogger(project_name)
+    # Return existing logger if available
+    if project_name in _loggers:
+        return _loggers[project_name]
     
-    # If logger doesn't have handlers, set up a new one
-    if not logger.handlers:
-        return setup_logger(project_name)
-        
-    return logger
+    # Create new logger if not found
+    return setup_logger(project_name)
 
 def configure_logging_from_config(config: dict) -> logging.Logger:
     """

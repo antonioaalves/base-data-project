@@ -7,14 +7,13 @@ import logging
 import json
 import copy
 from datetime import datetime
-from typing import Dict, List, Any, Optional, Union, Type
+from typing import Dict, List, Any, Optional, Union, Type, Tuple
 
 # Local stuff
 from base_data_project.process_management.exceptions import InvalidDataError
 from base_data_project.process_management.utils import generate_cache_key, validate_decision
-
-# Initialize logger with a default name - will be updated in __init__
-logger = logging.getLogger('base_data_project')
+from base_data_project.log_config import get_logger
+from base_data_project.process_management.stage_handler import ProcessStageHandler
 
 class ProcessManager:
     """
@@ -24,7 +23,7 @@ class ProcessManager:
     Specific processes should inherit from this class and register their decision points.
     """
 
-    def __init__(self, core_data: Any, project_name: str = None):
+    def __init__(self, core_data: Any, project_name: str = 'base_data_project'):
         """
         Initialize the ProcessManager with core data.
 
@@ -38,30 +37,39 @@ class ProcessManager:
         self.saved_scenarios = []             
         self.decision_points = {}             
         self.decision_schemas = {}            
-        self.default_values = {}              
+        self.default_values = {}
+        self.project_name = project_name
         
-        # NEW: Extract and store config from core_data
+        # Extract config first
         if isinstance(core_data, dict) and 'config' in core_data:
             self.config = core_data['config']
-            self.logger.info("Config extracted from core_data")
         else:
             self.config = {}
-            self.logger.warning("No config found in core_data, using empty config")
         
-        # Get project name from core_data config if available, otherwise use provided or default
-        if isinstance(core_data, dict) and 'config' in core_data and 'PROJECT_NAME' in core_data['config']:
-            self.project_name = core_data['config']['PROJECT_NAME']
-        else:
-            self.project_name = project_name or 'base_data_project'
+        # CREATE LOGGER BEFORE USING IT
+        self.logger = get_logger(self.project_name)
         
-        # Get project-specific logger
-        self.logger = logging.getLogger(self.project_name)
+        # Create stage handler
+        self.stage_handler = ProcessStageHandler(
+            process_manager=self,
+            config=self.config,
+            project_name=self.project_name
+        )
         
-        self.logger.info("Flexible ProcessManager initialized with core data")
+        # NOW you can use the logger
+        self.logger.info("ProcessManager initialized with core data")
+
+    def get_stage_handler(self) -> ProcessStageHandler:
+        """Get the stage handler instance."""
+        return self.stage_handler
 
     @property
     def config(self):
-        return self.core_data.get('config', {})
+        return getattr(self, '_config', {})
+
+    @config.setter
+    def config(self, value):
+        self._config = value
 
     def register_decision_point(self, stage: int, schema: Type, required: bool = True, 
                                defaults: Optional[Dict[str, Any]] = None) -> None:
@@ -262,7 +270,7 @@ class ProcessManager:
                         self.logger.error(error_msg)
                         raise InvalidDataError(error_msg)
     
-    def _generate_cache_key(self, stage: int) -> Union[int, str]:
+    def _generate_cache_key(self, stage: int) -> Tuple[int, str]:
         """
         Generate a unique key for caching based on relevant decisions.
         
@@ -270,7 +278,7 @@ class ProcessManager:
             stage: The stage number to generate a key for
             
         Returns:
-            A hash value or string to use as cache key
+            A tuple of (stage number, hash value) to use as cache key
         """
         # Only include decisions that affect this stage (decisions from previous stages)
         relevant_decisions = {
@@ -471,3 +479,16 @@ class ProcessManager:
         
         # Return the data record ID (simple index for now)
         return len(self.generated_data) - 1
+
+    def get_stage_decision(self, stage: int, decision_name: str) -> Optional[Dict[str, Any]]:
+        """
+        Get a specific decision for a stage.
+        
+        Args:
+            stage: Stage number
+            decision_name: Name of the decision
+            
+        Returns:
+            Decision dictionary or None if not available
+        """
+        return self.current_decisions.get(stage, {}).get(decision_name)

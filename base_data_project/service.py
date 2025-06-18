@@ -1,13 +1,14 @@
 """Base service class for process orchestration."""
 
 import logging
-from typing import Dict, Any, Optional, Tuple
+from typing import Dict, Any, Optional, Tuple, Type, List
 from datetime import datetime
 
 from base_data_project.data_manager.managers.base import BaseDataManager
 from base_data_project.process_management.manager import ProcessManager
 from base_data_project.process_management.stage_handler import ProcessStageHandler
 from base_data_project.storage.models import BaseDataModel
+from base_data_project.log_config import get_logger
 
 class BaseService:
     """
@@ -18,7 +19,7 @@ class BaseService:
     """
     
     def __init__(self, data_manager: BaseDataManager, process_manager: Optional[ProcessManager] = None, 
-                project_name: str = 'base_data_project', data_model_class: BaseDataModel = None):
+                project_name: str = 'base_data_project', data_model_class: Optional[Type[BaseDataModel]] = None):
         """
         Initialize the service with data and process managers.
         
@@ -33,8 +34,9 @@ class BaseService:
         
         # Process tracking
         self.stage_handler = ProcessStageHandler(process_manager=process_manager, 
-                                               config=process_manager.config if process_manager else {}) \
-                                if process_manager else None
+                                               config=process_manager.config if process_manager else {},
+                                               project_name=project_name
+                                            ) if process_manager else None
         
         # Data container and model initialization
         self.data_container = None
@@ -48,10 +50,10 @@ class BaseService:
 
         # Create data model if a class was provided 
         if data_model_class:
-            self.data_model = data_model_class(self.data_container)
+            self.data_model = data_model_class(self.data_container, project_name=project_name)
         
         # Get logger
-        self.logger = logging.getLogger(project_name)
+        self.logger = get_logger(project_name)
         self.logger.info(f"Initialized {self.__class__.__name__}")
 
     def initialize_process(self, name: str, description: str) -> str:
@@ -193,7 +195,7 @@ class BaseService:
             return self.process_manager.get_stage_decision(stage, decision_name)
         return None
     
-    def get_decisions_for_stage(self, stage_name: str) -> Dict[str, Any]:
+    def get_decisions_for_stage(self, stage_name: str) -> Tuple[List[str], Dict[str, Any]]:
         """
         Get all decisions for a specific stage by stage name.
         
@@ -201,19 +203,19 @@ class BaseService:
             stage_name: Name of the stage to get decisions for
             
         Returns:
-            Dictionary of decisions or empty dict if not available
+            Tuple of (list of decision names, dictionary of decisions)
         """
         if not self.stage_handler or not self.process_manager:
-            return {}
+            return [], {}
             
         stage = self.stage_handler.stages.get(stage_name)
         if not stage:
             self.logger.warning(f"Stage '{stage_name}' not found in stage handler")
-            return {}
+            return [], {}
             
         stage_sequence = stage.get('sequence')
         if stage_sequence is None:
             self.logger.warning(f"No sequence found for stage '{stage_name}'")
-            return {}
+            return [], {}
             
         return stage_sequence, self.process_manager.current_decisions.get(stage_sequence, {})

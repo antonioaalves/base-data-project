@@ -5,6 +5,7 @@ import importlib
 from typing import Dict, Any, Optional, Type
 
 from base_data_project.data_manager.managers.base import BaseDataManager
+from base_data_project.log_config import get_logger
 
 class DataManagerFactory:
     """
@@ -34,13 +35,15 @@ class DataManagerFactory:
     @classmethod
     def create_data_manager(cls, 
                           data_source_type: str, 
-                          config: Optional[Dict[str, Any]] = None) -> BaseDataManager:
+                          config: Optional[Dict[str, Any]] = None,
+                          project_name: str = 'base_data_project') -> BaseDataManager:
         """
         Create and return a data manager instance.
         
         Args:
             data_source_type: Type of data source ('csv', 'db', etc.)
             config: Configuration for the data manager
+            project_name: Name of the project for logging
             
         Returns:
             Initialized data manager instance
@@ -48,8 +51,8 @@ class DataManagerFactory:
         Raises:
             ValueError: If the data source type is unsupported
         """
-        logger = logging.getLogger(config.get('PROJECT_NAME', 'base_data_project') 
-                                if config else 'base_data_project')
+        # Use the framework logger
+        logger = get_logger(project_name)
         
         # Default empty configuration
         if config is None:
@@ -66,7 +69,7 @@ class DataManagerFactory:
             manager_class = cls._registered_managers[data_source_type_lower]
             
             # Create instance
-            return manager_class(config=config)
+            return manager_class(config=config, project_name=project_name)
         
         # Try to import built-in managers
         try:
@@ -80,14 +83,14 @@ class DataManagerFactory:
                 if hasattr(managers, 'CSVDataManager'):
                     manager_class = getattr(managers, 'CSVDataManager')
                     cls.register_data_manager('csv', manager_class)
-                    return manager_class(config=config)
+                    return manager_class(config=config, project_name=project_name)
             
             # Check for database manager
             if data_source_type_lower in ['db', 'database', 'sql']:
                 if hasattr(managers, 'DBDataManager'):
                     manager_class = getattr(managers, 'DBDataManager')
                     cls.register_data_manager('db', manager_class)
-                    return manager_class(config=config)
+                    return manager_class(config=config, project_name=project_name)
             
         except ImportError:
             logger.warning("Could not import built-in data managers")
@@ -124,7 +127,7 @@ class DataManagerFactory:
                             
                             # Create instance
                             logger.info(f"Successfully imported data manager '{class_name}' from {module_path}")
-                            return manager_class(config=config)
+                            return manager_class(config=config, project_name=project_name)
                     
                 except ImportError:
                     # Try next path
