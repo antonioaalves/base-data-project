@@ -7,6 +7,8 @@ from datetime import datetime
 from abc import ABC, abstractmethod
 import traceback
 
+from base_data_project.log_config import get_logger
+
 class BaseAlgorithm(ABC):
     """
     Abstract base class for defining algorithms.
@@ -29,9 +31,16 @@ class BaseAlgorithm(ABC):
         self.status = "not_started"
         self.error = None
         
-        # Get logger - try to use project name from parameters or default
-        project_name = self.parameters.get('project_name', 'base_data_project')
-        self.logger = logging.getLogger(project_name)
+        # Get project name from parameters or config
+        if isinstance(self.parameters, dict):
+            if 'config' in self.parameters and 'project_name' in self.parameters['config']:
+                self.project_name = self.parameters['config']['project_name']
+            else:
+                self.project_name = self.parameters.get('project_name', 'base_data_project')
+        else:
+            self.project_name = 'base_data_project'
+            
+        self.logger = get_logger(self.project_name)
         
         self.logger.info(f"Initialized algorithm: {algo_name}")
 

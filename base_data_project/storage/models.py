@@ -1,15 +1,16 @@
-""""""
+"""Base data model implementation."""
 
 # Dependencies
 from sqlalchemy import create_engine, Column, Integer, String, LargeBinary, DateTime, Text
-from sqlalchemy.orm import declarative_base
+from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
-from typing import Optional
+from typing import Optional, Dict, Any
 import datetime
 import logging
 
 # Local stuff
 from base_data_project.storage.containers import BaseDataContainer
+from base_data_project.log_config import get_logger
 
 # Create base class for models
 Base = declarative_base()
@@ -34,23 +35,23 @@ class IntermediateData(Base):
 
 
 class BaseDataModel:
-    """
-    Base class for all data models in the framework.
-    Data models are responsible for domain-specific data operations and use a data container for intermediate storage.
-    """
-
+    """Base class for data models in the framework."""
+    
     def __init__(self, data_container: Optional[BaseDataContainer] = None, project_name: str = 'base_data_project'):
         """
-        Initialize the data model with a data container.
+        Initialize the data model.
         
         Args:
-            data_container: Storage container for intermediate results
-            project_name: Project name for logging        
+            data_container: Optional data container to initialize with
+            project_name: Project name for logging
         """
-
-        # Storage container
+        self.project_name = project_name
+        self.logger = get_logger(project_name)
+        
+        ## Create default data container with project name if none provided
+        #if data_container is None:
+        #    data_container = BaseDataContainer(project_name=project_name, config=config)
+            
         self.data_container = data_container
-
-        # Get logger
-        self.logger = logging.getLogger(project_name)
-        self.logger.info(f"Initialized {self.__class__.__name__}")
+        
+        self.logger.info(f"Initialized {self.__class__.__name__} with project {project_name}")

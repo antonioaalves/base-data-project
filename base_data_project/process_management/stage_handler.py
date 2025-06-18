@@ -13,6 +13,7 @@ from base_data_project.process_management.exceptions import (
     DependencyError
 )
 from base_data_project.storage.factory import DataContainerFactory
+from base_data_project.log_config import get_logger
 
 class ProcessStageHandler:
     """
@@ -22,7 +23,7 @@ class ProcessStageHandler:
     process stages, recording decisions, and monitoring progress.
     """
     
-    def __init__(self, process_manager, config: Dict[str, Any]):
+    def __init__(self, process_manager, config: Dict[str, Any], project_name: str = 'base_data_project'):
         """
         Initialize the stage handler
         
@@ -36,33 +37,30 @@ class ProcessStageHandler:
         self.current_process_id = None
         self.initialized = False
         
-        # Get project name from config
-        project_name = config.get('PROJECT_NAME', 'base_data_project')
-        
         # Get logger
-        self.logger = logging.getLogger(project_name)
+        self.logger = get_logger(project_name)
 
         # Initialize data container based on configuration
         storage_strategy = config.get('storage_strategy', {'mode': 'memory'})
-        
+        self.logger.info(f"project_name in stage_handler init: {project_name}")
         if storage_strategy.get('mode') == 'memory':
             from base_data_project.storage.containers import MemoryDataContainer
-            self.data_container = MemoryDataContainer(storage_strategy)
+            self.data_container = MemoryDataContainer(config=config, project_name=project_name)
         elif storage_strategy.get('mode') == 'persist':
             # We'll implement these later
             if storage_strategy.get('persist_format') == 'csv':
                 from base_data_project.storage.containers import CSVDataContainer
-                self.data_container = CSVDataContainer(storage_strategy)
+                self.data_container = CSVDataContainer(config=config, project_name=project_name)
             else:
                 from base_data_project.storage.containers import DBDataContainer
-                self.data_container = DBDataContainer(storage_strategy)
+                self.data_container = DBDataContainer(config=config, project_name=project_name)
         elif storage_strategy.get('mode') == 'hybrid':
             from base_data_project.storage.containers import HybridDataContainer
-            self.data_container = HybridDataContainer(storage_strategy)
+            self.data_container = HybridDataContainer(config=config, project_name=project_name)
         else:
             # Default to memory
             from base_data_project.storage.containers import MemoryDataContainer
-            self.data_container = MemoryDataContainer(storage_strategy)
+            self.data_container = MemoryDataContainer(config=config, project_name=project_name)
         
     def initialize_process(self, name: str, description: str) -> str:
         """

@@ -1,4 +1,5 @@
 # Base Data Project
+v1.1.0
 
 A standardized framework for data processing projects that provides:
 
