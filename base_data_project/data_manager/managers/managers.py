@@ -1021,67 +1021,67 @@ class DBDataManager(BaseDataManager):
             # Don't raise exception - return False to allow fallback to file logging
             return False
 
-# Alternative implementation using query file approach
-# (Add this as well if you prefer the query file pattern)
+    # Alternative implementation using query file approach
+    # (Add this as well if you prefer the query file pattern)
 
-def set_process_errors_with_file(self, 
-                                message_key: str, 
-                                rendered_message: str, 
-                                error_type: str = 'INFO', 
-                                **kwargs) -> bool:
-    """
-    Alternative implementation using query file pattern.
-    
-    This version reads the Oracle stored procedure call from a SQL file,
-    following the existing pattern used elsewhere in the framework.
-    
-    Args:
-        message_key: Template key (e.g., 'iniProc', 'errCallSubProc')
-        rendered_message: Human-readable message after template rendering
-        error_type: Log level ('INFO', 'ERROR', 'WARNING')
-        **kwargs: Additional parameters for query execution
+    def set_process_errors_with_file(self, 
+                                    message_key: str, 
+                                    rendered_message: str, 
+                                    error_type: str = 'INFO', 
+                                    **kwargs) -> bool:
+        """
+        Alternative implementation using query file pattern.
         
-    Returns:
-        bool: True if database logging succeeded, False otherwise
-    """
-    try:
-        # Get query file path from config
-        query_file = self.config.get('logging', {}).get('db_logging_query', 'queries/log_process_errors.sql')
+        This version reads the Oracle stored procedure call from a SQL file,
+        following the existing pattern used elsewhere in the framework.
         
-        # Check if query file exists
-        if not os.path.exists(query_file):
-            self.logger.error(f"Database logging query file not found: {query_file}")
+        Args:
+            message_key: Template key (e.g., 'iniProc', 'errCallSubProc')
+            rendered_message: Human-readable message after template rendering
+            error_type: Log level ('INFO', 'ERROR', 'WARNING')
+            **kwargs: Additional parameters for query execution
+            
+        Returns:
+            bool: True if database logging succeeded, False otherwise
+        """
+        try:
+            # Get query file path from config
+            query_file = self.config.get('logging', {}).get('db_logging_query', 'queries/log_process_errors.sql')
+            
+            # Check if query file exists
+            if not os.path.exists(query_file):
+                self.logger.error(f"Database logging query file not found: {query_file}")
+                return False
+            
+            # Get external call data
+            external_data = self.config.get('external_call_data', {})
+            if not external_data:
+                self.logger.error("No external_call_data found in config for process error logging")
+                return False
+            
+            # Prepare parameters for query substitution
+            query_params = {
+                'user': external_data.get('wfm_user', 'WFM'),
+                'fk_process': external_data.get('current_process_id'),
+                'type_error': error_type,
+                'process_type': 'WFM',
+                'error_code': message_key,
+                'description': rendered_message,
+                'employee_id': external_data.get('wfm_proc_colab'),
+                'schedule_day': external_data.get('start_date', '2025-01-01')
+            }
+            
+            # Validate required parameters
+            if query_params['fk_process'] is None:
+                self.logger.error("Missing current_process_id in external_call_data")
+                return False
+            
+            # Use existing execute_sql method
+            self.execute_sql(query_file=query_file, **query_params)
+            
+            self.logger.debug(f"Successfully logged process error to database via query file: {message_key}")
+            return True
+            
+        except Exception as e:
+            self.logger.error(f"Failed to log process error to database via query file: {str(e)}")
             return False
-        
-        # Get external call data
-        external_data = self.config.get('external_call_data', {})
-        if not external_data:
-            self.logger.error("No external_call_data found in config for process error logging")
-            return False
-        
-        # Prepare parameters for query substitution
-        query_params = {
-            'user': external_data.get('wfm_user', 'WFM'),
-            'fk_process': external_data.get('current_process_id'),
-            'type_error': error_type,
-            'process_type': 'WFM',
-            'error_code': message_key,
-            'description': rendered_message,
-            'employee_id': external_data.get('wfm_proc_colab'),
-            'schedule_day': external_data.get('start_date', '2025-01-01')
-        }
-        
-        # Validate required parameters
-        if query_params['fk_process'] is None:
-            self.logger.error("Missing current_process_id in external_call_data")
-            return False
-        
-        # Use existing execute_sql method
-        self.execute_sql(query_file=query_file, **query_params)
-        
-        self.logger.debug(f"Successfully logged process error to database via query file: {message_key}")
-        return True
-        
-    except Exception as e:
-        self.logger.error(f"Failed to log process error to database via query file: {str(e)}")
-        return False
