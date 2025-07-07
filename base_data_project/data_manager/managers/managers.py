@@ -911,3 +911,177 @@ class DBDataManager(BaseDataManager):
             self.logger.error(f"Error executing raw SQL: {str(e)}")
             self.logger.debug(f"Failed query: {formatted_query}")
             raise
+
+    def set_process_errors(self, 
+                message_key: str, 
+                rendered_message: str, 
+                error_type: str = 'INFO', 
+                **kwargs) -> bool:
+        """
+        Log structured messages to database using Oracle stored procedure.
+        
+        This method integrates with the existing S_PROCESSO.SET_PROCESS_ERRORS stored procedure
+        to log process events and errors to the database.
+        
+        Args:
+            message_key: Template key (e.g., 'iniProc', 'errCallSubProc')
+            rendered_message: Human-readable message after template rendering  
+            error_type: Log level ('INFO', 'ERROR', 'WARNING')
+            **kwargs: Additional parameters for query execution
+            
+        Returns:
+            bool: True if database logging succeeded, False otherwise
+            
+        Database Integration:
+            Uses Oracle stored procedure with these parameters:
+            - i_user: User from external_call_data['wfm_user']
+            - i_fk_process: Process ID from external_call_data['current_process_id'] 
+            - i_type_error: The error_type parameter
+            - i_process_type: Fixed value 'WFM' for algorithm_GD
+            - i_error_code: The message_key parameter
+            - i_description: The rendered_message parameter
+            - i_employee_id: Employee ID from external_call_data['wfm_proc_colab']
+            - i_schedule_day: Date from external_call_data['start_date']
+        """
+        try:
+            # Check if session exists
+            if not hasattr(self, 'session') or self.session is None:
+                self.logger.error("No database session available for process error logging")
+                return False
+            
+            # Get external call data from config
+            external_data = self.config.get('external_call_data', {})
+            
+            if not external_data:
+                self.logger.error("No external_call_data found in config for process error logging")
+                return False
+            
+            # Extract required parameters from external_call_data
+            user = external_data.get('wfm_user', 'WFM')
+            fk_process = external_data.get('current_process_id')
+            process_type = 'WFM'  # Fixed value for algorithm_GD
+            error_code = message_key
+            description = rendered_message
+            employee_id = external_data.get('wfm_proc_colab')
+            schedule_day = external_data.get('start_date', '2025-01-01')
+            
+            # Validate required parameters
+            if fk_process is None:
+                self.logger.error("Missing current_process_id in external_call_data")
+                return False
+            
+            # Prepare the Oracle stored procedure call
+            oracle_query = """
+            declare 
+            i_user VARCHAR2(242) := :user_param;
+            i_fk_process NUMBER := :fk_process_param;
+            i_type_error VARCHAR2(242) := :type_error_param; 
+            i_process_type VARCHAR2(242) := :process_type_param; 
+            i_error_code VARCHAR2(242) := :error_code_param; 
+            i_description VARCHAR2(242) := :description_param; 
+            i_employee_id NUMBER := :employee_id_param; 
+            i_schedule_day DATE := to_date(:schedule_day_param,'yyyy-mm-dd'); 
+            begin
+            S_PROCESSO.SET_PROCESS_ERRORS(i_user,i_fk_process,i_type_error,i_process_type,i_error_code,i_description,i_employee_id,i_schedule_day);
+            COMMIT;
+            end;
+            """
+            # TODO: pass this to file
+            
+            # Prepare parameters
+            params = {
+                'user_param': user,
+                'fk_process_param': fk_process,
+                'type_error_param': error_type,
+                'process_type_param': process_type,
+                'error_code_param': error_code,
+                'description_param': description,
+                'employee_id_param': employee_id,
+                'schedule_day_param': schedule_day
+            }
+            
+            # Log the operation (debug level to avoid noise)
+            self.logger.debug(f"Logging to database: {error_type} - {message_key} - {rendered_message[:100]}...")
+            
+            # Execute the stored procedure
+            from sqlalchemy import text
+            
+            result = self.session.execute(text(oracle_query), params)
+            
+            # The stored procedure includes COMMIT, so we don't need to commit again
+            self.logger.debug(f"Successfully logged process error to database: {message_key}")
+            
+            return True
+            
+        except Exception as e:
+            # Log error using file logger to avoid recursion
+            self.logger.error(f"Failed to log process error to database: {str(e)}")
+            self.logger.debug(f"Failed parameters - message_key: {message_key}, error_type: {error_type}")
+            
+            # Don't raise exception - return False to allow fallback to file logging
+            return False
+
+# Alternative implementation using query file approach
+# (Add this as well if you prefer the query file pattern)
+
+def set_process_errors_with_file(self, 
+                                message_key: str, 
+                                rendered_message: str, 
+                                error_type: str = 'INFO', 
+                                **kwargs) -> bool:
+    """
+    Alternative implementation using query file pattern.
+    
+    This version reads the Oracle stored procedure call from a SQL file,
+    following the existing pattern used elsewhere in the framework.
+    
+    Args:
+        message_key: Template key (e.g., 'iniProc', 'errCallSubProc')
+        rendered_message: Human-readable message after template rendering
+        error_type: Log level ('INFO', 'ERROR', 'WARNING')
+        **kwargs: Additional parameters for query execution
+        
+    Returns:
+        bool: True if database logging succeeded, False otherwise
+    """
+    try:
+        # Get query file path from config
+        query_file = self.config.get('logging', {}).get('db_logging_query', 'queries/log_process_errors.sql')
+        
+        # Check if query file exists
+        if not os.path.exists(query_file):
+            self.logger.error(f"Database logging query file not found: {query_file}")
+            return False
+        
+        # Get external call data
+        external_data = self.config.get('external_call_data', {})
+        if not external_data:
+            self.logger.error("No external_call_data found in config for process error logging")
+            return False
+        
+        # Prepare parameters for query substitution
+        query_params = {
+            'user': external_data.get('wfm_user', 'WFM'),
+            'fk_process': external_data.get('current_process_id'),
+            'type_error': error_type,
+            'process_type': 'WFM',
+            'error_code': message_key,
+            'description': rendered_message,
+            'employee_id': external_data.get('wfm_proc_colab'),
+            'schedule_day': external_data.get('start_date', '2025-01-01')
+        }
+        
+        # Validate required parameters
+        if query_params['fk_process'] is None:
+            self.logger.error("Missing current_process_id in external_call_data")
+            return False
+        
+        # Use existing execute_sql method
+        self.execute_sql(query_file=query_file, **query_params)
+        
+        self.logger.debug(f"Successfully logged process error to database via query file: {message_key}")
+        return True
+        
+    except Exception as e:
+        self.logger.error(f"Failed to log process error to database via query file: {str(e)}")
+        return False
