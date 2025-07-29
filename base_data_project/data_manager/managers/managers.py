@@ -568,14 +568,15 @@ class DBDataManager(BaseDataManager):
             raise ImportError("SQLAlchemy is required for DBDataManager")
 
         # Get database URL from config
-        db_url = self.config.get('db_url')
+        db_url = self.config.database.get_connection_url()
         if not db_url:
             # Try to construct a default SQLite database path
-            data_dir = self.config.get('data_dir', 'data')
-            db_path = os.path.join(data_dir, 'production.db')
-            db_url = f"sqlite:///{db_path}"
+            #data_dir = self.config.get('data_dir', 'data')
+            #db_path = os.path.join(data_dir, 'production.db')
+            #db_url = f"sqlite:///{db_path}"
             
             self.logger.info(f"No database URL provided, using default: {db_url}")
+            raise ValueError("No database URL provided in config, please check the config file and manager")
         
         try:
             # Create engine
@@ -912,65 +913,28 @@ class DBDataManager(BaseDataManager):
             self.logger.debug(f"Failed query: {formatted_query}")
             raise
 
-    def set_process_errors(self, 
-                message_key: str, 
-                rendered_message: str, 
-                error_type: str = 'INFO', 
-                **kwargs) -> bool:
+    def set_process_errors(self, message_key: str, rendered_message: str, values_replace_dict: dict, error_type: str = 'INFO', **kwargs) -> bool:
         """
         Log structured messages to database using Oracle stored procedure.
-        
-        This method integrates with the existing S_PROCESSO.SET_PROCESS_ERRORS stored procedure
-        to log process events and errors to the database.
         
         Args:
             message_key: Template key (e.g., 'iniProc', 'errCallSubProc')
             rendered_message: Human-readable message after template rendering  
             error_type: Log level ('INFO', 'ERROR', 'WARNING')
-            **kwargs: Additional parameters for query execution
             
         Returns:
             bool: True if database logging succeeded, False otherwise
-            
-        Database Integration:
-            Uses Oracle stored procedure with these parameters:
-            - i_user: User from external_call_data['wfm_user']
-            - i_fk_process: Process ID from external_call_data['current_process_id'] 
-            - i_type_error: The error_type parameter
-            - i_process_type: Fixed value 'WFM' for algorithm_GD
-            - i_error_code: The message_key parameter
-            - i_description: The rendered_message parameter
-            - i_employee_id: Employee ID from external_call_data['wfm_proc_colab']
-            - i_schedule_day: Date from external_call_data['start_date']
         """
         try:
-            # Check if session exists
             if not hasattr(self, 'session') or self.session is None:
-                self.logger.error("No database session available for process error logging")
+                return False
+
+            if not values_replace_dict:
+                self.logger.error("No values_replace_dict found")
                 return False
             
-            # Get external call data from config
-            external_data = self.config.get('external_call_data', {})
+            from sqlalchemy import text
             
-            if not external_data:
-                self.logger.error("No external_call_data found in config for process error logging")
-                return False
-            
-            # Extract required parameters from external_call_data
-            user = external_data.get('wfm_user', 'WFM')
-            fk_process = external_data.get('current_process_id')
-            process_type = 'WFM'  # Fixed value for algorithm_GD
-            error_code = message_key
-            description = rendered_message
-            employee_id = external_data.get('wfm_proc_colab')
-            schedule_day = external_data.get('start_date', '2025-01-01')
-            
-            # Validate required parameters
-            if fk_process is None:
-                self.logger.error("Missing current_process_id in external_call_data")
-                return False
-            
-            # Prepare the Oracle stored procedure call
             oracle_query = """
             declare 
             i_user VARCHAR2(242) := :user_param;
@@ -986,39 +950,23 @@ class DBDataManager(BaseDataManager):
             COMMIT;
             end;
             """
-            # TODO: pass this to file
             
-            # Prepare parameters
             params = {
-                'user_param': user,
-                'fk_process_param': fk_process,
+                'user_param': values_replace_dict.get('wfm_user', 'WFM'),
+                'fk_process_param': values_replace_dict.get('current_process_id'),
                 'type_error_param': error_type,
-                'process_type_param': process_type,
-                'error_code_param': error_code,
-                'description_param': description,
-                'employee_id_param': employee_id,
-                'schedule_day_param': schedule_day
+                'process_type_param': 'WFM',
+                'error_code_param': message_key,
+                'description_param': rendered_message,
+                'employee_id_param': values_replace_dict.get('wfm_proc_colab', None),
+                'schedule_day_param': values_replace_dict.get('date_str', None)
             }
             
-            # Log the operation (debug level to avoid noise)
-            self.logger.debug(f"Logging to database: {error_type} - {message_key} - {rendered_message[:100]}...")
-            
-            # Execute the stored procedure
-            from sqlalchemy import text
-            
-            result = self.session.execute(text(oracle_query), params)
-            
-            # The stored procedure includes COMMIT, so we don't need to commit again
-            self.logger.debug(f"Successfully logged process error to database: {message_key}")
-            
+            self.session.execute(text(oracle_query), params)
             return True
             
         except Exception as e:
-            # Log error using file logger to avoid recursion
-            self.logger.error(f"Failed to log process error to database: {str(e)}")
-            self.logger.debug(f"Failed parameters - message_key: {message_key}, error_type: {error_type}")
-            
-            # Don't raise exception - return False to allow fallback to file logging
+            self.logger.error(f"Database logging failed: {str(e)}")
             return False
 
     # Alternative implementation using query file approach
