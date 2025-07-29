@@ -34,11 +34,10 @@ def create_components(use_db: bool = False,
         config = {}
     
     # Ensure project_name is in config
-    #config['project_name'] = project_name
+    config['project_name'] = project_name
     
     # Determine data source type
-    #data_source_type = 'db' if use_db or config.get('use_db', False) else 'csv'
-    data_source_type = 'db' if use_db or config.system.use_db else 'csv'
+    data_source_type = 'db' if use_db or config.get('use_db', False) else 'csv'
 
     # Create data manager through factory
     data_manager = DataManagerFactory.create_data_manager(
