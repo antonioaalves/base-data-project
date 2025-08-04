@@ -41,7 +41,13 @@ class ProcessStageHandler:
         self.logger = get_logger(project_name)
 
         # Initialize data container based on configuration
-        storage_strategy = config.get('storage_strategy', {'mode': 'memory'})
+        # Support both ConfigurationManager and dictionary formats
+        if hasattr(config, 'system'):
+            # ConfigurationManager format
+            storage_strategy = config.system.storage_strategy if hasattr(config.system, 'storage_strategy') else {'mode': 'memory'}
+        else:
+            # Dictionary format
+            storage_strategy = config.get('storage_strategy', {'mode': 'memory'})
         self.logger.info(f"project_name in stage_handler init: {project_name}")
         if storage_strategy.get('mode') == 'memory':
             from base_data_project.storage.containers import MemoryDataContainer
@@ -80,8 +86,17 @@ class ProcessStageHandler:
             self.current_process_id = f"proc_{datetime.now().strftime('%Y%m%d%H%M%S')}_{uuid.uuid4().hex[:8]}"
             
             # Initialize stages from config
-            stages_config = self.config.get('stages', {})
+            # Support both ConfigurationManager and dictionary formats
+            if hasattr(self.config, 'stages'):
+                # ConfigurationManager format
+                stages_config = self.config.stages.stages
+                self.logger.info(f"DEBUG: Using ConfigurationManager format, stages_config: {list(stages_config.keys())}")
+            else:
+                # Dictionary format
+                stages_config = self.config.get('stages', {})
+                self.logger.info(f"DEBUG: Using dictionary format, stages_config: {list(stages_config.keys())}")
             self.stages = {}
+            self.logger.info(f"DEBUG: About to process {len(stages_config)} stages: {list(stages_config.keys())}")
             
             # Setup tracking for each stage
             for stage_name, stage_config in stages_config.items():
@@ -160,7 +175,9 @@ class ProcessStageHandler:
                             stage['decision_points'].append(decision_id)
 
                 self.stages[stage_name] = stage
+                self.logger.info(f"DEBUG: Added stage '{stage_name}' to self.stages")
             
+            self.logger.info(f"DEBUG: Final self.stages contains: {list(self.stages.keys())}")
             self.initialized = True
             self.logger.info(f"Process initialized with ID: {self.current_process_id}")
             return self.current_process_id

@@ -32,12 +32,27 @@ def create_components(use_db: bool = False,
     # Use configuration if provided, otherwise use empty dict
     if config is None:
         config = {}
+        # Ensure project_name is in config
+        config['project_name'] = project_name
+    else:
+        # Convert ConfigurationManager to legacy dictionary format if needed
+        if hasattr(config, 'get_base_data_project_config'):
+            config_legacy = config.get_base_data_project_config()
+            logger.info("Converted ConfigurationManager to legacy dictionary format")
+        else:
+            config_legacy = config
+        
+
     
-    # Ensure project_name is in config
-    config['project_name'] = project_name
-    
-    # Determine data source type
-    data_source_type = 'db' if use_db or config.get('use_db', False) else 'csv'
+    # Determine data source type - support both ConfigurationManager and dictionary formats
+    if hasattr(config, 'system'):
+        # ConfigurationManager format
+        data_source_type = 'db' if use_db or config.system.use_db else 'csv'
+        system_config = config_legacy.get('system', {})  # For ProcessManager compatibility
+    else:
+        # Dictionary format
+        system_config = config_legacy.get('system', {})
+        data_source_type = 'db' if use_db or system_config.get('use_db', False) else 'csv'
 
     # Create data manager through factory
     data_manager = DataManagerFactory.create_data_manager(
@@ -55,8 +70,8 @@ def create_components(use_db: bool = False,
             
             # Initialize with core data
             core_data = {
-                "version": config.get("version", "1.0.0"),
-                "config": config,
+                "version": system_config.get('project_version', '1.0.0'),
+                "config": config_legacy,  # ProcessManager needs dictionary format
                 "data_source_type": data_source_type,
                 "use_db": use_db
             }
