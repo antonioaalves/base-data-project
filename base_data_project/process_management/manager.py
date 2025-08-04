@@ -249,7 +249,13 @@ class ProcessManager:
         # If a substage is specified, also check required decisions for previous substages within the current stage            
         if substage is not None:
             # Get substages configuration for the current stage
-            stage_config = self.config.get('stages', {}).get(stage, {})
+            # Support both ConfigurationManager and dictionary formats
+            if hasattr(self.config, 'stages'):
+                # ConfigurationManager format
+                stage_config = self.config.stages.stages.get(stage, {})
+            else:
+                # Dictionary format
+                stage_config = self.config.get('stages', {}).get(stage, {})
             substages = stage_config.get('substages', {})
 
             # Get the sequence of the current substage

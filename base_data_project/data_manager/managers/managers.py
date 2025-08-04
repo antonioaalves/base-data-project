@@ -568,10 +568,10 @@ class DBDataManager(BaseDataManager):
             raise ImportError("SQLAlchemy is required for DBDataManager")
 
         # Get database URL from config
-        db_url = self.config.get('db_url')
+        db_url = self.config.get_database_url()
         if not db_url:
             # Try to construct a default SQLite database path
-            data_dir = self.config.get('data_dir', 'data')
+            data_dir = self.config.database.connection.data_dir
             db_path = os.path.join(data_dir, 'production.db')
             db_url = f"sqlite:///{db_path}"
             

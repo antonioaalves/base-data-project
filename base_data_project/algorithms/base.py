@@ -17,12 +17,13 @@ class BaseAlgorithm(ABC):
     the required abstract methods.
     """
 
-    def __init__(self, algo_name: str, parameters: Optional[Dict[str, Any]] = None):
+    def __init__(self, algo_name: str, project_name: str = 'base_data_project', parameters: Optional[Dict[str, Any]] = None):
         """
         Initialize algorithm with name and parameters.
         
         Args:
             algo_name: Name of the algorithm
+            project_name: Name of the project
             parameters: Optional dictionary of algorithm parameters
         """
         self.algo_name = algo_name
@@ -30,15 +31,7 @@ class BaseAlgorithm(ABC):
         self.execution_time = None
         self.status = "not_started"
         self.error = None
-        
-        # Get project name from parameters or config
-        if isinstance(self.parameters, dict):
-            if 'config' in self.parameters and 'project_name' in self.parameters['config']:
-                self.project_name = self.parameters['config']['project_name']
-            else:
-                self.project_name = self.parameters.get('project_name', 'base_data_project')
-        else:
-            self.project_name = 'base_data_project'
+        self.project_name = project_name
             
         self.logger = get_logger(self.project_name)
         
