@@ -38,7 +38,7 @@ class BaseAlgorithm(ABC):
         self.logger.info(f"Initialized algorithm: {algo_name}")
 
     @abstractmethod
-    def adapt_data(self, data: Any = None, algorithm_treatment_params: Optional[Dict[str, Any]] = None) -> Any:
+    def adapt_data(self, data: Any = None, algorithm_params_dict: Optional[Dict[str, Any]] = None) -> Any:
         """
         Transform input data into algorithm-specific format.
         
@@ -87,7 +87,7 @@ class BaseAlgorithm(ABC):
         """
         pass
 
-    def run(self, parameters: Optional[Dict[str, Any]] = None, data: Any = None, algorithm_treatment_params: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    def run(self, parameters: Optional[Dict[str, Any]] = None, data: Any = None, algorithm_params_dict: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """
         Main execution flow with timing and error handling.
         
@@ -117,7 +117,7 @@ class BaseAlgorithm(ABC):
         try:
             # Stage 1: Adapt the data to algorithm format
             self.logger.info("Stage 1: Adapting data")
-            adapted_data = self.adapt_data(data, algorithm_treatment_params)
+            adapted_data = self.adapt_data(data, algorithm_params_dict)
             
             # Stage 2: Execute the core algorithm logic
             self.logger.info("Stage 2: Executing algorithm")
