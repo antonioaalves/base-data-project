@@ -38,7 +38,7 @@ class BaseAlgorithm(ABC):
         self.logger.info(f"Initialized algorithm: {algo_name}")
 
     @abstractmethod
-    def adapt_data(self, data: Any = None) -> Any:
+    def adapt_data(self, data: Any = None, algorithm_treatment_params: Optional[Dict[str, Any]] = None) -> Any:
         """
         Transform input data into algorithm-specific format.
         
@@ -47,6 +47,8 @@ class BaseAlgorithm(ABC):
         
         Args:
             data: Input data (optional if data was provided at initialization)
+            algorithm_treatment_params: Optional dictionary containing algorithm-specific
+                                      data treatment parameters (e.g., data processing options)
             
         Returns:
             Transformed data ready for algorithm processing
@@ -85,7 +87,7 @@ class BaseAlgorithm(ABC):
         """
         pass
 
-    def run(self, parameters: Optional[Dict[str, Any]] = None, data: Any = None) -> Dict[str, Any]:
+    def run(self, parameters: Optional[Dict[str, Any]] = None, data: Any = None, algorithm_treatment_params: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """
         Main execution flow with timing and error handling.
         
@@ -98,6 +100,8 @@ class BaseAlgorithm(ABC):
         Args:
             parameters: Optional parameters to update existing ones
             data: Optional data to process
+            algorithm_treatment_params: Optional dictionary containing algorithm-specific
+                                      data treatment parameters (e.g., data processing options)
             
         Returns:
             Formatted algorithm results
@@ -113,7 +117,7 @@ class BaseAlgorithm(ABC):
         try:
             # Stage 1: Adapt the data to algorithm format
             self.logger.info("Stage 1: Adapting data")
-            adapted_data = self.adapt_data(data)
+            adapted_data = self.adapt_data(data, algorithm_treatment_params)
             
             # Stage 2: Execute the core algorithm logic
             self.logger.info("Stage 2: Executing algorithm")
