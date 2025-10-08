@@ -22,7 +22,7 @@ class BaseDataContainer:
     intermediate data from processing stages.
     """
     
-    def __init__(self, config: Dict[str, Any], project_name: str = 'base_data_project'):
+    def __init__(self, storage_config: Dict[str, Any], project_name: str = 'base_data_project'):
         """
         Initialize the data container with configuration.
         
@@ -30,7 +30,7 @@ class BaseDataContainer:
             config: Configuration dictionary with storage settings
             project_name: Name of the project for logging
         """
-        self.config = config
+        self.storage_config = storage_config
         self.logger = get_logger(project_name)
         
         self.logger.info(f"Initialized {self.__class__.__name__}")
@@ -101,14 +101,14 @@ class MemoryDataContainer(BaseDataContainer):
     Data container that stores intermediate data in memory.
     """
     
-    def __init__(self, config: Dict[str, Any], project_name: str = 'base_data_project'):
+    def __init__(self, storage_config: Dict[str, Any], project_name: str = 'base_data_project'):
         """
         Initialize the memory data container.
         
         Args:
             config: Configuration dictionary with storage settings
         """
-        super().__init__(config=config, project_name=project_name)
+        super().__init__(storage_config=storage_config, project_name=project_name)
         self.logger.info(f"Initialized {self.__class__.__name__} with project name: {project_name}")
         self.data_store = {}  # Stage data indexed by storage_key
         self.metadata_store = {}  # Metadata for each stored item
@@ -230,7 +230,7 @@ class MemoryDataContainer(BaseDataContainer):
         Args:
             policy: Cleanup policy to apply ('keep_none', 'keep_latest', 'keep_all')
         """
-        policy = policy or self.config.get('cleanup_policy', 'keep_latest')
+        policy = policy or self.storage_config.get('cleanup_policy', 'keep_latest')
         
         if policy == 'keep_none':
             # Clear all data
@@ -373,17 +373,17 @@ class CSVDataContainer(BaseDataContainer):
     Data container that stores intermediate data as CSV files.
     """
     
-    def __init__(self, config: Dict[str, Any], project_name: str = 'base_data_project'):
+    def __init__(self, storage_config: Dict[str, Any], project_name: str = 'base_data_project'):
         """
         Initialize the CSV data container.
         
         Args:
             config: Configuration dictionary with storage settings
         """
-        super().__init__(config=config, project_name=project_name)
+        super().__init__(storage_config=storage_config, project_name=project_name)
         
         # Get storage directory from config
-        self.storage_dir = config.get('storage_dir', 'data/intermediate')
+        self.storage_dir = storage_config.get('storage_dir', 'data/intermediate')
         
         # Create storage directory if it doesn't exist
         os.makedirs(self.storage_dir, exist_ok=True)
@@ -666,7 +666,7 @@ class CSVDataContainer(BaseDataContainer):
         Args:
             policy: Cleanup policy to apply ('keep_none', 'keep_latest', 'keep_all')
         """
-        policy = policy or self.config.get('cleanup_policy', 'keep_latest')
+        policy = policy or self.storage_config.get('cleanup_policy', 'keep_latest')
         
         if policy == 'keep_none':
             # Delete all files and directories
@@ -784,22 +784,22 @@ class DBDataContainer(BaseDataContainer):
     Data container that stores intermediate data in a database.
     """
     
-    def __init__(self, config: Dict[str, Any], project_name: str = 'base_data_project'):
+    def __init__(self, storage_config: Dict[str, Any], project_name: str = 'base_data_project'):
         """
         Initialize the database data container.
         
         Args:
-            config: Configuration dictionary with storage settings
+            storage_config: Configuration dictionary with storage settings
         """
-        super().__init__(config=config, project_name=project_name)
+        super().__init__(storage_config=storage_config, project_name=project_name)
         
         # Extract database configuration
-        self.db_url = config.get('db_url')
+        self.db_url = storage_config.get('db_url')
         
         if not self.db_url:
             # Default to SQLite if no URL provided
             import os
-            storage_dir = config.get('storage_dir', 'data/intermediate')
+            storage_dir = storage_config.get('storage_dir', 'data/intermediate')
             os.makedirs(storage_dir, exist_ok=True)
             self.db_url = f"sqlite:///{os.path.join(storage_dir, 'intermediate_data.db')}"
         
@@ -1032,7 +1032,7 @@ class DBDataContainer(BaseDataContainer):
             policy: Cleanup policy to apply ('keep_none', 'keep_latest', 'keep_all')
         """
         try:
-            policy = policy or self.config.get('cleanup_policy', 'keep_latest')
+            policy = policy or self.storage_config.get('cleanup_policy', 'keep_latest')
             
             if policy == 'keep_none':
                 # Delete all records
@@ -1145,13 +1145,13 @@ class HybridDataContainer(BaseDataContainer):
     (Placeholder for future implementation)
     """
     
-    def __init__(self, config: Dict[str, Any], project_name: str = 'base_data_project'):
-        super().__init__(config=config, project_name=project_name)
+    def __init__(self, storage_config: Dict[str, Any], project_name: str = 'base_data_project'):
+        super().__init__(storage_config=storage_config, project_name=project_name)
         self.logger.warning("HybridDataContainer is not fully implemented yet. Falling back to memory storage.")
         
         # For now, just delegate to MemoryDataContainer
         raise NotImplementedError("Hybrid approach not implemented yet")
-        self._memory_container = MemoryDataContainer(config)
+        self._memory_container = MemoryDataContainer(storage_config)
     
     def store_stage_data(self, stage_name: str, data: Any, metadata: Optional[Dict[str, Any]] = None) -> str:
         return self._memory_container.store_stage_data(stage_name, data, metadata)

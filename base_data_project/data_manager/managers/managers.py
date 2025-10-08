@@ -686,8 +686,7 @@ class DBDataManager(BaseDataManager):
                     if rows:
                         data = pd.DataFrame(rows, columns=columns)
                     else:
-                        data = pd.DataFrame(columns=columns)
-                        #data = pd.DataFrame(columns=columns)
+                        data = pd.DataFrame()
                     
                     self.logger.info(f"Successfully loaded {len(data)} rows using custom query")
                     return data

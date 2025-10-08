@@ -105,7 +105,6 @@ class BaseService:
             
             # Execute the appropriate stage method based on name
             success = self._dispatch_stage(stage_name, algorithm_name, algorithm_params)
-            self.logger.info(f"DEBUG: success: {success}")
             
             # Complete stage in stage handler if available
             if self.stage_handler:
