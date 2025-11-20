@@ -57,19 +57,19 @@ class CSVDataManager(BaseDataManager):
         """
         Connect to CSV files - validates that configured files exist.
         """
-        # Get CSV file mappings from config
-        filepath_map = self.config.get('dummy_data_filepaths', {})
+        # Get CSV file mappings from config using paths API
+        filepath_map = self.config.paths.csv_filepaths if hasattr(self.config, 'paths') else {}
         
-        # Get data directory path
-        data_dir = self.config.get('data_dir', 'data')
+        # Get data directory path from system config
+        data_dir = self.config.paths.project_root_dir if hasattr(self.config, 'paths') else 'data'
         
         # Ensure data directory exists
         if not os.path.exists(data_dir):
             os.makedirs(data_dir, exist_ok=True)
             self.logger.info(f"Created data directory: {data_dir}")
         
-        # Ensure output directory exists
-        output_dir = self.config.get('output_dir', os.path.join(data_dir, 'output'))
+        # Ensure output directory exists using paths API
+        output_dir = self.config.paths.get_output_dir() if hasattr(self.config, 'paths') else os.path.join(data_dir, 'output')
         if not os.path.exists(output_dir):
             os.makedirs(output_dir, exist_ok=True)
             self.logger.info(f"Created output directory: {output_dir}")
@@ -143,7 +143,7 @@ class CSVDataManager(BaseDataManager):
             ValueError: If no filepath configured for entity
             FileNotFoundError: If configured file doesn't exist
         """
-        filepath_map = self.config.get('dummy_data_filepaths', {})
+        filepath_map = self.config.paths.csv_filepaths if hasattr(self.config, 'paths') else {}
         
         if entity not in filepath_map:
             error_msg = f"No CSV filepath configured for entity '{entity}'"
@@ -517,7 +517,7 @@ class CSVDataManager(BaseDataManager):
         # Get output filepath
         filepath = kwargs.get('filepath')
         if not filepath:
-            output_dir = self.config.get('output_dir', os.path.join('data', 'output'))
+            output_dir = self.config.paths.get_output_dir() if hasattr(self.config, 'paths') else os.path.join('data', 'output')
             timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
             filepath = os.path.join(output_dir, f"{entity}_{timestamp}.csv")
         
@@ -567,12 +567,12 @@ class DBDataManager(BaseDataManager):
             self.logger.error("SQLAlchemy is required for DBDataManager. Please install with: pip install sqlalchemy")
             raise ImportError("SQLAlchemy is required for DBDataManager")
 
-        # Get database URL from config
-        db_url = self.config.get_database_url()
+        # Get database URL from config using proper API
+        db_url = self.config.database.get_connection_url() if self.config.is_database_enabled else None
         if not db_url:
             # Try to construct a default SQLite database path
-            data_dir = self.config.database.connection.data_dir
-            db_path = os.path.join(data_dir, 'production.db')
+            storage_dir = self.config.system.storage_strategy.get('storage_dir', 'data') if hasattr(self.config.system, 'storage_strategy') else 'data'
+            db_path = os.path.join(storage_dir, 'production.db')
             db_url = f"sqlite:///{db_path}"
             
             self.logger.info(f"No database URL provided, using default: {db_url}")
@@ -950,8 +950,8 @@ class DBDataManager(BaseDataManager):
                 self.logger.error("No database session available for process error logging")
                 return False
             
-            # Get external call data from config
-            external_data = self.config.get('external_call_data', {})
+            # Get external call data from config using parameters API
+            external_data = self.config.parameters.process_parameters.get('external_call_data', {}) if hasattr(self.config, 'parameters') else {}
             
             if not external_data:
                 self.logger.error("No external_call_data found in config for process error logging")
@@ -1046,16 +1046,19 @@ class DBDataManager(BaseDataManager):
             bool: True if database logging succeeded, False otherwise
         """
         try:
-            # Get query file path from config
-            query_file = self.config.get('logging', {}).get('db_logging_query', 'queries/log_process_errors.sql')
+            # Get query file path from config - would need to be added to PathsConfig if needed
+            # For now, using a default path or system config if available
+            query_file = 'queries/log_process_errors.sql'
+            if hasattr(self.config.system, 'logging_config') and isinstance(self.config.system.logging_config, dict):
+                query_file = self.config.system.logging_config.get('db_logging_query', query_file)
             
             # Check if query file exists
             if not os.path.exists(query_file):
                 self.logger.error(f"Database logging query file not found: {query_file}")
                 return False
             
-            # Get external call data
-            external_data = self.config.get('external_call_data', {})
+            # Get external call data using parameters API
+            external_data = self.config.parameters.process_parameters.get('external_call_data', {}) if hasattr(self.config, 'parameters') else {}
             if not external_data:
                 self.logger.error("No external_call_data found in config for process error logging")
                 return False

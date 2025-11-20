@@ -6,6 +6,7 @@ from typing import Dict, Any, Optional, Type
 
 from base_data_project.data_manager.managers.base import BaseDataManager
 from base_data_project.log_config import get_logger
+from src.configuration_manager.manager import ConfigurationManager
 
 class DataManagerFactory:
     """
@@ -35,7 +36,7 @@ class DataManagerFactory:
     @classmethod
     def create_data_manager(cls, 
                           data_source_type: str, 
-                          config: Optional[Dict[str, Any]] = None,
+                          config: Optional[ConfigurationManager] = None,
                           project_name: str = 'base_data_project') -> BaseDataManager:
         """
         Create and return a data manager instance.
@@ -56,7 +57,7 @@ class DataManagerFactory:
         
         # Default empty configuration
         if config is None:
-            config = {}
+            config = ConfigurationManager()
         
         # Normalize data source type
         data_source_type_lower = data_source_type.lower()

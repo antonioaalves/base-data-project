@@ -100,23 +100,48 @@ def get_logger(project_name: str, data_manager=None, config=None) -> logging.Log
     # Otherwise return regular logger (existing behavior)
     return file_logger
 
-def configure_logging_from_config(config: dict) -> logging.Logger:
+def configure_logging_from_config(config) -> logging.Logger:
     """
-    Configure logging based on configuration dictionary.
+    Configure logging based on configuration object.
     
     Args:
-        config: Configuration dictionary
+        config: Configuration object (ConfigurationManager instance or legacy dict)
         
     Returns:
         Configured logger instance
     """
-    # Get project name from config
-    project_name = config.get('PROJECT_NAME', 'base_data_project')
+    # Get project name from config using proper API
+    if hasattr(config, 'project_name'):
+        project_name = config.project_name
+    elif hasattr(config, 'system') and hasattr(config.system, 'project_name'):
+        project_name = config.system.project_name
+    else:
+        # Fallback for legacy dict-based config
+        project_name = config.get('PROJECT_NAME', 'base_data_project') if isinstance(config, dict) else 'base_data_project'
     
-    # Get log configuration
-    log_level_name = config.get('log_level', 'INFO')
-    log_dir = config.get('log_dir', 'logs')
-    log_format = config.get('log_format', '%(asctime)s | %(levelname)8s | %(filename)s:%(lineno)d | %(message)s')
+    # Get log configuration using proper API
+    if hasattr(config, 'system') and hasattr(config.system, 'get_log_level'):
+        log_level_name = config.system.get_log_level()
+    elif isinstance(config, dict):
+        log_level_name = config.get('log_level', 'INFO')
+    else:
+        log_level_name = 'INFO'
+    
+    # Get log directory - use paths API if available
+    if hasattr(config, 'paths') and hasattr(config.paths, 'project_root_dir'):
+        log_dir = os.path.join(config.paths.project_root_dir, 'logs')
+    elif isinstance(config, dict):
+        log_dir = config.get('log_dir', 'logs')
+    else:
+        log_dir = 'logs'
+    
+    # Get log format from system logging config
+    if hasattr(config, 'system') and hasattr(config.system, 'logging_config') and isinstance(config.system.logging_config, dict):
+        log_format = config.system.logging_config.get('log_format', '%(asctime)s | %(levelname)8s | %(filename)s:%(lineno)d | %(message)s')
+    elif isinstance(config, dict):
+        log_format = config.get('log_format', '%(asctime)s | %(levelname)8s | %(filename)s:%(lineno)d | %(message)s')
+    else:
+        log_format = '%(asctime)s | %(levelname)8s | %(filename)s:%(lineno)d | %(message)s'
     
     # Convert log level name to logging constant
     log_level = getattr(logging, log_level_name) if isinstance(log_level_name, str) else log_level_name
@@ -165,7 +190,13 @@ class EnhancedLogger:
             import pandas as pd
             import os
             
-            template_path = self.config.get('logging', {}).get('df_messages_path', 'data/csvs/messages.csv')
+            # Get template path using proper API
+            if hasattr(self.config, 'system') and hasattr(self.config.system, 'logging_config') and isinstance(self.config.system.logging_config, dict):
+                template_path = self.config.system.logging_config.get('df_messages_path', 'data/csvs/messages.csv')
+            elif isinstance(self.config, dict):
+                template_path = self.config.get('logging', {}).get('df_messages_path', 'data/csvs/messages.csv')
+            else:
+                template_path = 'data/csvs/messages.csv'
             
             if os.path.exists(template_path):
                 df = pd.read_csv(template_path, sep=';', dtype=str)
@@ -186,10 +217,29 @@ class EnhancedLogger:
     
     def _setup_database_logging(self):
         """Setup database logging if configuration allows."""
-        logging_config = self.config.get('logging', {})
-        environment = logging_config.get('environment', 'local')
+        # Get logging config using proper API
+        if hasattr(self.config, 'system') and hasattr(self.config.system, 'logging_config') and isinstance(self.config.system.logging_config, dict):
+            logging_config = self.config.system.logging_config
+        elif isinstance(self.config, dict):
+            logging_config = self.config.get('logging', {})
+        else:
+            logging_config = {}
+        
+        # Get environment using proper API
+        if hasattr(self.config, 'get_environment'):
+            environment = self.config.get_environment()
+        else:
+            environment = logging_config.get('environment', 'local')
+        
         db_enabled = logging_config.get('db_logging_enabled', True)
-        external_data = self.config.get('external_call_data', {})
+        
+        # Get external call data using proper API
+        if hasattr(self.config, 'parameters') and hasattr(self.config.parameters, 'process_parameters'):
+            external_data = self.config.parameters.process_parameters.get('external_call_data', {})
+        elif isinstance(self.config, dict):
+            external_data = self.config.get('external_call_data', {})
+        else:
+            external_data = {}
         
         self.db_logging_enabled = (
             environment == 'server' and 

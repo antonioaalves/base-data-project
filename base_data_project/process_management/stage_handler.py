@@ -40,14 +40,14 @@ class ProcessStageHandler:
         # Get logger
         self.logger = get_logger(project_name)
 
-        # Initialize data container based on configuration
-        # Support both ConfigurationManager and dictionary formats
-        if hasattr(config, 'system'):
-            # ConfigurationManager format
-            storage_strategy = config.system.storage_strategy if hasattr(config.system, 'storage_strategy') else {'mode': 'memory'}
-        else:
-            # Dictionary format
+        # Initialize data container based on configuration using proper API
+        if hasattr(config, 'system') and hasattr(config.system, 'storage_strategy'):
+            storage_strategy = config.system.storage_strategy
+        elif isinstance(config, dict):
             storage_strategy = config.get('storage_strategy', {'mode': 'memory'})
+        else:
+            storage_strategy = {'mode': 'memory'}
+        
         self.logger.info(f"project_name in stage_handler init: {project_name}")
         if storage_strategy.get('mode') == 'memory':
             from base_data_project.storage.containers import MemoryDataContainer
@@ -85,18 +85,15 @@ class ProcessStageHandler:
             # Create process record
             self.current_process_id = f"proc_{datetime.now().strftime('%Y%m%d%H%M%S')}_{uuid.uuid4().hex[:8]}"
             
-            # Initialize stages from config
-            # Support both ConfigurationManager and dictionary formats
+            # Initialize stages from config using proper API
             if hasattr(self.config, 'stages'):
-                # ConfigurationManager format
-                stages_config = self.config.stages.stages
-                self.logger.info(f"DEBUG: Using ConfigurationManager format, stages_config: {list(stages_config.keys())}")
-            else:
-                # Dictionary format
+                stages_config = self.config.stages.get_all_stages()
+            elif isinstance(self.config, dict):
                 stages_config = self.config.get('stages', {})
-                self.logger.info(f"DEBUG: Using dictionary format, stages_config: {list(stages_config.keys())}")
+            else:
+                stages_config = {}
+            
             self.stages = {}
-            self.logger.info(f"DEBUG: About to process {len(stages_config)} stages: {list(stages_config.keys())}")
             
             # Setup tracking for each stage
             for stage_name, stage_config in stages_config.items():
@@ -151,12 +148,20 @@ class ProcessStageHandler:
                         if self.process_manager:
                             # For each algorithm, register a decision point
                             for algorithm in stage_config['algorithms']:
+                                # Get algorithm defaults using proper API
+                                if hasattr(self.config, 'parameters'):
+                                    algo_defaults = self.config.parameters.get_algorithm_defaults()
+                                elif isinstance(self.config, dict):
+                                    algo_defaults = self.config.get('parameters', {}).get('algorithm_defaults', {})
+                                else:
+                                    algo_defaults = {}
+                                
                                 # Register with default parameters
                                 self.process_manager.register_decision_point(
                                     stage=sequence,
                                     schema=dict,  # Simple dict schema for now
                                     required=True,
-                                    defaults=self.config.get('algorithm_defaults', {}).get(algorithm, {})
+                                    defaults=algo_defaults
                                 )
                 
                     if 'decisions' in stage_config:
@@ -175,9 +180,7 @@ class ProcessStageHandler:
                             stage['decision_points'].append(decision_id)
 
                 self.stages[stage_name] = stage
-                self.logger.info(f"DEBUG: Added stage '{stage_name}' to self.stages")
             
-            self.logger.info(f"DEBUG: Final self.stages contains: {list(self.stages.keys())}")
             self.initialized = True
             self.logger.info(f"Process initialized with ID: {self.current_process_id}")
             return self.current_process_id
@@ -420,8 +423,13 @@ class ProcessStageHandler:
             json_str = json.dumps(result_data)
             size_bytes = len(json_str.encode('utf-8'))
             
-            # Set a reasonable size threshold (e.g., 100KB)
-            size_threshold = self.config.get('inline_threshold_bytes', 100 * 1024)  # Default to 100KB
+            # Set a reasonable size threshold (e.g., 100KB) using proper API
+            if hasattr(self.config, 'system') and hasattr(self.config.system, 'storage_strategy'):
+                size_threshold = self.config.system.storage_strategy.get('inline_threshold_bytes', 100 * 1024)
+            elif isinstance(self.config, dict):
+                size_threshold = self.config.get('storage_strategy', {}).get('inline_threshold_bytes', 100 * 1024)
+            else:
+                size_threshold = 100 * 1024  # Default to 100KB
             
             return size_bytes <= size_threshold and check_complexity(result_data)
         except (TypeError, OverflowError, ValueError):
@@ -522,8 +530,16 @@ class ProcessStageHandler:
         if stage['status'] != 'in_progress':
             raise ProcessManagementError(f"Cannot start substage {substage_name}: stage {stage_name} is not in progress")
         
-        # Get substages configuration
-        substages_config = self.config.get('stages', {}).get(stage_name, {}).get('substages', {})
+        # Get substages configuration using proper API
+        if hasattr(self.config, 'stages'):
+            stage_cfg = self.config.stages.get_stage_config(stage_name)
+            substages_config = stage_cfg.get('substages', {}) if isinstance(stage_cfg, dict) else getattr(stage_cfg, 'substages', {})
+        elif isinstance(self.config, dict):
+            stage_cfg = self.config.get('stages', {}).get(stage_name, {})
+            substages_config = stage_cfg.get('substages', {})
+        else:
+            substages_config = {}
+        
         if substage_name not in substages_config:
             raise InvalidStageSequenceError(f"Unknown substage: {substage_name} in stage {stage_name}")
         

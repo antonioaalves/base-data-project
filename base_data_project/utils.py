@@ -5,10 +5,11 @@ from typing import Dict, Any, Tuple, Optional
 
 # Local stuff
 from base_data_project.log_config import get_logger
+from src.configuration_manager.manager import ConfigurationManager
 
 def create_components(use_db: bool = False, 
                      no_tracking: bool = False, 
-                     config: Optional[Dict[str, Any]] = None,
+                     config: Optional[ConfigurationManager] = None,
                      project_name: str = 'base_data_project') -> Tuple[Any, Any]:
     """
     Create and configure system components based on arguments.
@@ -16,7 +17,7 @@ def create_components(use_db: bool = False,
     Args:
         use_db: Whether to use database instead of CSV files
         no_tracking: Whether to disable process tracking
-        config: Configuration dictionary
+        config: Configuration manager
         project_name: Name of the project for logging
         
     Returns:
@@ -31,28 +32,13 @@ def create_components(use_db: bool = False,
     
     # Use configuration if provided, otherwise use empty dict
     if config is None:
-        config = {}
-        # Ensure project_name is in config
-        config['project_name'] = project_name
-    else:
-        # Convert ConfigurationManager to legacy dictionary format if needed
-        if hasattr(config, 'get_base_data_project_config'):
-            config_legacy = config.get_base_data_project_config()
-            logger.info("Converted ConfigurationManager to legacy dictionary format")
-        else:
-            config_legacy = config
-        
-
+        config = ConfigurationManager()
     
-    # Determine data source type - support both ConfigurationManager and dictionary formats
-    if hasattr(config, 'system'):
-        # ConfigurationManager format
-        data_source_type = 'db' if use_db or config.system.use_db else 'csv'
-        system_config = config_legacy.get('system', {})  # For ProcessManager compatibility
-    else:
-        # Dictionary format
-        system_config = config_legacy.get('system', {})
-        data_source_type = 'db' if use_db or system_config.get('use_db', False) else 'csv'
+    # Ensure project_name is in config
+    #config['project_name'] = project_name
+    
+    # Determine data source type
+    data_source_type = 'db' if use_db or config.system.use_db else 'csv'
 
     # Create data manager through factory
     data_manager = DataManagerFactory.create_data_manager(
@@ -70,8 +56,8 @@ def create_components(use_db: bool = False,
             
             # Initialize with core data
             core_data = {
-                "version": system_config.get('project_version', '1.0.0'),
-                "config": config_legacy,  # ProcessManager needs dictionary format
+                "version": config.system.project_version,
+                "config": config,
                 "data_source_type": data_source_type,
                 "use_db": use_db
             }

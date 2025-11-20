@@ -249,21 +249,15 @@ class ProcessManager:
         # If a substage is specified, also check required decisions for previous substages within the current stage            
         if substage is not None:
             # Get substages configuration for the current stage
-            # Support both ConfigurationManager and dictionary formats
-            if hasattr(self.config, 'stages'):
-                # ConfigurationManager format
-                stage_config = self.config.stages.stages.get(stage, {})
-            else:
-                # Dictionary format
-                stage_config = self.config.get('stages', {}).get(stage, {})
-            substages = stage_config.get('substages', {})
+            stage_config = self.config.stages.get_stage_config(stage)
+            substages = stage_config.substages
 
             # Get the sequence of the current substage
-            current_stage_seq = substages.get(substage, {}).get('sequence', 0)
+            current_stage_seq = substages.get(substage).sequence
 
             # Check required decisions for revious substages
             for substage_name, substage_config in substages.items():
-                substage_seq = substage_config.get('sequence', 0)
+                substage_seq = substage_config.sequence
                 # Only check previous substages
                 if substage_seq < current_stage_seq:
                     # Get decision oints for this substage
@@ -453,15 +447,18 @@ class ProcessManager:
         Store generated data during process execution.
         
         Args:
-            stage: The stage object or ID where the data was generated
+            stage: The stage object or ID where the data was generated (dict or int)
             data_type: Type of data being stored (e.g., 'progress_update', 'stage_execution')
             entity_type: Type of entity the data relates to (e.g., 'stage', 'algorithm')
             entity_id: ID of the entity
             value: Numeric value to store
             metadata: Additional context information as a dictionary
         """
-        # Extract stage ID if a stage object was passed
-        stage_id = stage.get('id') if isinstance(stage, dict) else stage
+        # Extract stage ID if a stage dict was passed
+        if isinstance(stage, dict):
+            stage_id = stage.get('sequence', stage.get('id', 0))
+        else:
+            stage_id = stage
         
         # Create a record of the generated data
         data_record = {
@@ -497,4 +494,4 @@ class ProcessManager:
         Returns:
             Decision dictionary or None if not available
         """
-        return self.current_decisions.get(stage, {}).get(decision_name)
+        return self.current_decisions.get(stage).get(decision_name)
