@@ -549,14 +549,27 @@ class DBDataManager(BaseDataManager):
     """
     Data manager implementation for database sources.
     
-    Handles all operations related to database connections and queries.
+    MODIFIED: Opens and closes connections per operation instead of keeping 
+    a single connection open. This reduces connection count and avoids 
+    Oracle session limit issues.
+    
+    Connection lifecycle:
+    - connect(): Stores db_url and creates engine (no session)
+    - Each operation: Opens session -> executes -> closes session
+    - disconnect(): Disposes engine
     """
+    
+    def __init__(self, config: Dict[str, Any], project_name: str = 'base_data_project') -> None:
+        """Initialize the database data manager."""
+        super().__init__(config, project_name)
+        self.engine = None
+        self._db_url = None
+        self._Session = None  # Session factory
     
     def connect(self) -> None:
         """
-        Establish database connection using SQLAlchemy.
-        
-        Creates an engine and session for database operations.
+        Prepare database connection - creates engine but NOT a persistent session.
+        Sessions are created per-operation and closed immediately after.
         """
         # Lazy import SQLAlchemy to avoid dependency if not used
         try:
@@ -568,41 +581,63 @@ class DBDataManager(BaseDataManager):
             raise ImportError("SQLAlchemy is required for DBDataManager")
 
         # Get database URL from config using proper API
-        db_url = self.config.database.get_connection_url() if self.config.is_database_enabled else None
-        if not db_url:
+        self._db_url = self.config.database.get_connection_url() if self.config.is_database_enabled else None
+        if not self._db_url:
             # Try to construct a default SQLite database path
             storage_dir = self.config.system.storage_strategy.get('storage_dir', 'data') if hasattr(self.config.system, 'storage_strategy') else 'data'
             db_path = os.path.join(storage_dir, 'production.db')
-            db_url = f"sqlite:///{db_path}"
+            self._db_url = f"sqlite:///{db_path}"
             
-            self.logger.info(f"No database URL provided, using default: {db_url}")
+            self.logger.info(f"No database URL provided, using default: {self._db_url}")
         
         try:
-            # Create engine
-            self.engine = create_engine(db_url)
+            # Create engine (connection pool)
+            self.engine = create_engine(self._db_url)
             
-            # Create session
-            Session = sessionmaker(bind=self.engine)
-            self.session = Session()
+            # Create session factory (but don't create session yet)
+            self._Session = sessionmaker(bind=self.engine)
             
-            self.logger.info(f"Connected to database: {db_url}")
+            self.logger.info(f"Database engine created: {self._db_url}")
+            self.logger.info("Per-operation connection mode enabled - connections opened/closed per query")
             
         except Exception as e:
-            self.logger.error(f"Failed to connect to database: {str(e)}")
+            self.logger.error(f"Failed to create database engine: {str(e)}")
             raise
+
+    def _get_session(self):
+        """
+        Create a new session for an operation.
+        Caller MUST close this session when done.
+        
+        Returns:
+            New SQLAlchemy session
+        """
+        if self._Session is None:
+            raise RuntimeError("No database session factory available. Call connect() first.")
+        
+        session = self._Session()
+        self.logger.debug("Opened new database session")
+        return session
+    
+    def _close_session(self, session):
+        """
+        Close a session after an operation.
+        
+        Args:
+            session: SQLAlchemy session to close
+        """
+        if session:
+            try:
+                session.close()
+                self.logger.debug("Closed database session")
+            except Exception as e:
+                self.logger.error(f"Error closing session: {str(e)}")
 
     def disconnect(self) -> None:
         """
-        Close the database connection.
+        Dispose the database engine.
         """
-        if hasattr(self, 'session') and self.session:
-            try:
-                self.session.close()
-                self.logger.info("Closed database session")
-            except Exception as e:
-                self.logger.error(f"Error closing database session: {str(e)}")
-        
-        if hasattr(self, 'engine'):
+        if hasattr(self, 'engine') and self.engine:
             try:
                 self.engine.dispose()
                 self.logger.info("Disposed database engine")
@@ -612,6 +647,7 @@ class DBDataManager(BaseDataManager):
     def load_data(self, entity: str, **kwargs) -> pd.DataFrame:
         """
         Load data from database table.
+        Opens a new connection, executes query, closes connection.
         
         Args:
             entity: Entity type determining the table or model to query
@@ -625,11 +661,6 @@ class DBDataManager(BaseDataManager):
         Returns: 
             DataFrame with loaded data
         """
-        # Check if session exists
-        if not hasattr(self, 'session') or self.session is None:
-            self.logger.error("No database session available. Make sure to call connect() first.")
-            raise RuntimeError("No database session available")
-        
         try:
             from sqlalchemy import Table, MetaData, text
         except ImportError:
@@ -669,6 +700,9 @@ class DBDataManager(BaseDataManager):
                 self.logger.error(f"Error loading query file {query_file}: {str(e)}")
                 raise
         
+        # Open session for this operation
+        session = self._get_session()
+        
         try:
             self.logger.info(f"Loading database data for entity '{entity}'")
             
@@ -677,7 +711,7 @@ class DBDataManager(BaseDataManager):
                 self.logger.info("Executing custom query")
                 try: 
                     # FIXED: Wrap the query in text() for SQLAlchemy
-                    result = self.session.execute(text(custom_query))
+                    result = session.execute(text(custom_query))
                     
                     # Get column names BEFORE consuming the result
                     columns = list(result.keys())
@@ -687,7 +721,6 @@ class DBDataManager(BaseDataManager):
                         data = pd.DataFrame(rows, columns=columns)
                     else:
                         data = pd.DataFrame(columns=columns)
-                        #data = pd.DataFrame(columns=columns)
                     
                     self.logger.info(f"Successfully loaded {len(data)} rows using custom query")
                     return data
@@ -699,7 +732,7 @@ class DBDataManager(BaseDataManager):
             # Case 2: Model class provided
             elif model_class is not None:
                 self.logger.info(f"Using model class: {model_class}")
-                query = self.session.query(model_class)
+                query = session.query(model_class)
                 
                 # Apply filters if any
                 for attr, value in filters.items():
@@ -732,7 +765,7 @@ class DBDataManager(BaseDataManager):
                 self.logger.info(f"Querying table directly: {entity}")
                 metadata = MetaData()
                 table = Table(entity, metadata, autoload_with=self.engine)
-                query = self.session.query(table)
+                query = session.query(table)
                 
                 # Apply filters if any
                 for column, value in filters.items():
@@ -763,6 +796,9 @@ class DBDataManager(BaseDataManager):
             self.logger.error(f"Custom query provided: {custom_query is not None}")
             self.logger.error(f"Model class: {model_class}")
             raise
+        finally:
+            # ALWAYS close the session after operation
+            self._close_session(session)
     
     def _format_query(self, query: str, **kwargs) -> str:
         """
@@ -804,6 +840,7 @@ class DBDataManager(BaseDataManager):
     def save_data(self, entity: str, data: pd.DataFrame, **kwargs) -> None:
         """
         Save data to database table.
+        Opens a new connection, executes insert, closes connection.
         
         Args:
             entity: Entity type determining the table to save to
@@ -814,16 +851,14 @@ class DBDataManager(BaseDataManager):
                 - index: Whether to include index (default False)
                 - chunk_size: Number of rows to insert at once
         """
-        # Check if session exists
-        if not hasattr(self, 'session') or self.session is None:
-            self.logger.error("No database session available. Make sure to call connect() first.")
-            raise RuntimeError("No database session available")
-        
         # Get parameters
         model_class = kwargs.get('model_class')
         if_exists = kwargs.get('if_exists', 'append')
         index = kwargs.get('index', False)
         chunk_size = kwargs.get('chunk_size', None)
+
+        # Open session for this operation
+        session = self._get_session()
 
         try:
             self.logger.info(f"Saving {len(data)} rows for entity '{entity}' to database")
@@ -838,14 +873,14 @@ class DBDataManager(BaseDataManager):
                         chunk = records[i:i+chunk_size]
                         for record in chunk:
                             instance = model_class(**record)
-                            self.session.add(instance)
-                        self.session.commit()
+                            session.add(instance)
+                        session.commit()
                 else:
                     # Insert all at once
                     for record in records:
                         instance = model_class(**record)
-                        self.session.add(instance)
-                    self.session.commit()
+                        session.add(instance)
+                    session.commit()
             else:
                 # Direct table save if no model_class is provided
                 data.to_sql(
@@ -859,14 +894,18 @@ class DBDataManager(BaseDataManager):
             self.logger.info(f"Successfully saved data for entity '{entity}'")
 
         except Exception as e:
-            if hasattr(self, 'session') and self.session:
-                self.session.rollback()
+            if session:
+                session.rollback()
             self.logger.error(f"Error saving database data: {str(e)}")
             raise
+        finally:
+            # ALWAYS close the session after operation
+            self._close_session(session)
 
     def execute_sql(self, sql_query: str, **kwargs) -> pd.DataFrame:
         """
         Execute a raw SQL query against the database.
+        Opens a new connection, executes query, closes connection.
         
         Args:
             sql_query: SQL query to execute
@@ -875,11 +914,6 @@ class DBDataManager(BaseDataManager):
         Returns:
             DataFrame with query results
         """
-        # Check if session exists
-        if not hasattr(self, 'session') or self.session is None:
-            self.logger.error("No database session available. Make sure to call connect() first.")
-            raise RuntimeError("No database session available")
-        
         try:
             from sqlalchemy import text
         except ImportError:
@@ -889,12 +923,15 @@ class DBDataManager(BaseDataManager):
         # Format query with parameters
         formatted_query = self._format_query(sql_query, **kwargs)
         
+        # Open session for this operation
+        session = self._get_session()
+        
         try:
             self.logger.info("Executing raw SQL query")
             self.logger.debug(f"SQL: {formatted_query}")
             
             # FIXED: Wrap the query in text() for SQLAlchemy
-            result = self.session.execute(text(formatted_query))
+            result = session.execute(text(formatted_query))
             
             # Get column names and rows
             columns = list(result.keys())
@@ -912,6 +949,9 @@ class DBDataManager(BaseDataManager):
             self.logger.error(f"Error executing raw SQL: {str(e)}")
             self.logger.debug(f"Failed query: {formatted_query}")
             raise
+        finally:
+            # ALWAYS close the session after operation
+            self._close_session(session)
 
     def set_process_errors(self, 
                 message_key: str, 
@@ -920,6 +960,7 @@ class DBDataManager(BaseDataManager):
                 **kwargs) -> bool:
         """
         Log structured messages to database using Oracle stored procedure.
+        Opens a new connection, executes procedure, closes connection.
         
         This method integrates with the existing S_PROCESSO.SET_PROCESS_ERRORS stored procedure
         to log process events and errors to the database.
@@ -944,11 +985,10 @@ class DBDataManager(BaseDataManager):
             - i_employee_id: Employee ID from external_call_data['wfm_proc_colab']
             - i_schedule_day: Date from external_call_data['start_date']
         """
+        # Open session for this operation
+        session = None
         try:
-            # Check if session exists
-            if not hasattr(self, 'session') or self.session is None:
-                self.logger.error("No database session available for process error logging")
-                return False
+            session = self._get_session()
             
             # Get external call data from config using parameters API
             external_data = self.config.parameters.process_parameters.get('external_call_data', {}) if hasattr(self.config, 'parameters') else {}
@@ -1007,7 +1047,7 @@ class DBDataManager(BaseDataManager):
             # Execute the stored procedure
             from sqlalchemy import text
             
-            result = self.session.execute(text(oracle_query), params)
+            result = session.execute(text(oracle_query), params)
             
             # The stored procedure includes COMMIT, so we don't need to commit again
             self.logger.debug(f"Successfully logged process error to database: {message_key}")
@@ -1021,6 +1061,10 @@ class DBDataManager(BaseDataManager):
             
             # Don't raise exception - return False to allow fallback to file logging
             return False
+        finally:
+            # ALWAYS close the session after operation
+            if session:
+                self._close_session(session)
 
     # Alternative implementation using query file approach
     # (Add this as well if you prefer the query file pattern)
